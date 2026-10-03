@@ -269,7 +269,7 @@ class _ManageComplaintsScreenState extends State<ManageComplaintsScreen> {
                                 final int id = t['id'] is int ? t['id'] : int.parse(t['id'].toString());
                                 final String name = t['student_name'] ?? 'Student';
                                 final String subj = t['subject'] ?? 'Support Ticket';
-                                final String status = t['status'] ?? 'open';
+                                // status unused
                                 final String priority = t['priority'] ?? (id % 2 == 0 ? 'High' : 'Medium');
                                 final String date = t['created_at'] ?? 'Recently';
 

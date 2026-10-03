@@ -4,7 +4,6 @@ import '../config/api_config.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/attendance_provider.dart';
-import '../providers/branding_provider.dart';
 import 'branding_logo_widget.dart';
 
 class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {

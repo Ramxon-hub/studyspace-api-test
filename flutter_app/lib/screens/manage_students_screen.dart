@@ -113,7 +113,7 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> with Single
         ),
         content: Text(
           'Move "$studentName" to Recycle Bin?\n\n'
-          'The student record will be safely stored in the Recycle Bin for 30 DAYS before permanent deletion. You can restore it anytime.',
+          'The student record will be safely stored in the Recycle Bin for 60 DAYS before permanent deletion. You can restore it anytime.',
           style: const TextStyle(fontSize: 14),
         ),
         actions: [
@@ -141,7 +141,7 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> with Single
       if (res['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(res['message'] ?? 'Student "$studentName" moved to Recycle Bin (Kept for 30 days).'),
+            content: Text(res['message'] ?? 'Student "$studentName" moved to Recycle Bin (Kept for 60 days).'),
             backgroundColor: Colors.orangeAccent,
           ),
         );
@@ -289,9 +289,25 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> with Single
               Row(
                 children: [
                   Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.event_seat_rounded, color: Colors.white),
+                      label: const Text('Edit Seat', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryIndigo,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _showChangeSeatModal(s);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.edit_rounded, color: AppColors.primaryIndigo),
-                      label: const Text('Edit Student', style: TextStyle(color: AppColors.primaryIndigo)),
+                      label: const Text('Edit Profile', style: TextStyle(color: AppColors.primaryIndigo)),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         side: const BorderSide(color: AppColors.primaryIndigo),
@@ -303,11 +319,11 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> with Single
                       },
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.delete_sweep_rounded, color: Colors.white),
-                      label: const Text('Move to Bin', style: TextStyle(color: Colors.white)),
+                      label: const Text('Bin', style: TextStyle(color: Colors.white)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.orangeAccent,
                         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -323,6 +339,276 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> with Single
               ),
             ],
           ),
+        );
+      },
+    );
+  }
+
+  void _showChangeSeatModal(Map<String, dynamic> s) {
+    final int studentId = s['id'] is int ? s['id'] : int.tryParse(s['id'].toString()) ?? 0;
+    final String studentName = s['name'] ?? 'Student';
+    final String currentSeatNo = s['seat_number'] != null ? s['seat_number'].toString() : 'Unassigned';
+    final int currentShiftId = s['shift_id'] is int ? s['shift_id'] : int.tryParse((s['shift_id'] ?? '1').toString()) ?? 1;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        List<dynamic> shifts = [];
+        List<dynamic> seatOptions = [];
+        bool isLoadingSeats = true;
+        bool isSubmitting = false;
+        int selectedShiftId = currentShiftId;
+        int? selectedSeatId;
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            if (shifts.isEmpty && isLoadingSeats) {
+              ApiService.getShifts().then((fetchedShifts) {
+                if (ctx.mounted) {
+                  setModalState(() {
+                    shifts = fetchedShifts;
+                    if (shifts.isNotEmpty && !shifts.any((sh) => sh['id'] == selectedShiftId)) {
+                      selectedShiftId = shifts.first['id'];
+                    }
+                  });
+                  ApiService.getSeatsWithStatus(shiftId: selectedShiftId, studentId: studentId).then((seatRes) {
+                    if (ctx.mounted) {
+                      setModalState(() {
+                        seatOptions = seatRes['seats'] ?? [];
+                        isLoadingSeats = false;
+                        final currentSeat = seatOptions.firstWhere((st) => st['status'] == 'CURRENT', orElse: () => null);
+                        if (currentSeat != null) {
+                          selectedSeatId = currentSeat['id'];
+                        }
+                      });
+                    }
+                  });
+                }
+              });
+            }
+
+            void fetchSeatsForShift(int newShiftId) {
+              setModalState(() {
+                selectedShiftId = newShiftId;
+                isLoadingSeats = true;
+                selectedSeatId = null;
+              });
+              ApiService.getSeatsWithStatus(shiftId: newShiftId, studentId: studentId).then((seatRes) {
+                if (ctx.mounted) {
+                  setModalState(() {
+                    seatOptions = seatRes['seats'] ?? [];
+                    isLoadingSeats = false;
+                    final currentSeat = seatOptions.firstWhere((st) => st['status'] == 'CURRENT', orElse: () => null);
+                    selectedSeatId = currentSeat != null ? currentSeat['id'] : (seatOptions.isNotEmpty ? seatOptions.first['id'] : null);
+                  });
+                }
+              });
+            }
+
+            Map<String, dynamic>? selectedSeatObj;
+            if (selectedSeatId != null) {
+              selectedSeatObj = seatOptions.firstWhere((st) => st['id'] == selectedSeatId, orElse: () => null);
+            }
+            final newSeatNo = selectedSeatObj != null ? selectedSeatObj['seat_number'].toString() : null;
+
+            return Padding(
+              padding: EdgeInsets.only(
+                top: 20,
+                left: 20,
+                right: 20,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.event_seat_rounded, color: AppColors.primaryIndigo),
+                            const SizedBox(width: 8),
+                            Text('Edit Seat: $studentName', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+                      ],
+                    ),
+                    const Divider(),
+                    const SizedBox(height: 8),
+
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryIndigo.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.primaryIndigo.withOpacity(0.2)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline_rounded, color: AppColors.primaryIndigo, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Current Seat Desk: Desk $currentSeatNo',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.primaryIndigo),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    const Text('Select Shift', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                    const SizedBox(height: 6),
+                    shifts.isEmpty
+                        ? const SizedBox(height: 36, child: Center(child: CircularProgressIndicator(strokeWidth: 2)))
+                        : DropdownButtonFormField<int>(
+                            value: selectedShiftId,
+                            decoration: const InputDecoration(
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              prefixIcon: Icon(Icons.schedule_rounded),
+                            ),
+                            items: shifts.map<DropdownMenuItem<int>>((sh) {
+                              return DropdownMenuItem<int>(
+                                value: sh['id'],
+                                child: Text('${sh['name']} (${sh['start_time']} - ${sh['end_time']})'),
+                              );
+                            }).toList(),
+                            onChanged: isSubmitting
+                                ? null
+                                : (val) {
+                                    if (val != null && val != selectedShiftId) {
+                                      fetchSeatsForShift(val);
+                                    }
+                                  },
+                          ),
+                    const SizedBox(height: 16),
+
+                    const Text('Select Available Seat Desk', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                    const SizedBox(height: 6),
+                    isLoadingSeats
+                        ? const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator(color: AppColors.primaryIndigo)))
+                        : DropdownButtonFormField<int>(
+                            value: selectedSeatId,
+                            decoration: const InputDecoration(
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              prefixIcon: Icon(Icons.event_seat_rounded),
+                            ),
+                            items: seatOptions.map<DropdownMenuItem<int>>((st) {
+                              final isCurrent = st['status'] == 'CURRENT';
+                              final isOccupied = st['status'] == 'OCCUPIED';
+                              final label = isCurrent
+                                  ? 'Desk ${st['seat_number']} — CURRENT'
+                                  : (isOccupied ? 'Desk ${st['seat_number']} — OCCUPIED (${st['occupant_name'] ?? 'Student'})' : 'Desk ${st['seat_number']} — AVAILABLE');
+                              return DropdownMenuItem<int>(
+                                value: st['id'],
+                                enabled: !isOccupied,
+                                child: Text(
+                                  label,
+                                  style: TextStyle(
+                                    color: isOccupied ? Colors.grey : (isCurrent ? AppColors.primaryIndigo : Colors.black87),
+                                    fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: isSubmitting
+                                ? null
+                                : (val) {
+                                    if (val != null) {
+                                      setModalState(() => selectedSeatId = val);
+                                    }
+                                  },
+                          ),
+                    const SizedBox(height: 20),
+
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryIndigo,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: isSubmitting || selectedSeatId == null
+                          ? null
+                          : () async {
+                              if (newSeatNo == null || (newSeatNo == currentSeatNo && selectedShiftId == currentShiftId)) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Please select a different available seat desk to reassign.')),
+                                );
+                                return;
+                              }
+
+                              final confirm = await showDialog<bool>(
+                                context: ctx,
+                                builder: (dialogCtx) => AlertDialog(
+                                  title: const Row(
+                                    children: [
+                                      Icon(Icons.help_outline_rounded, color: AppColors.primaryIndigo),
+                                      SizedBox(width: 8),
+                                      Text('Confirm Seat Change'),
+                                    ],
+                                  ),
+                                  content: Text('Change seat from $currentSeatNo to $newSeatNo?'),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(dialogCtx, false), child: const Text('CANCEL')),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryIndigo),
+                                      onPressed: () => Navigator.pop(dialogCtx, true),
+                                      child: const Text('CONFIRM', style: TextStyle(color: Colors.white)),
+                                    ),
+                                  ],
+                                ),
+                              );
+
+                              if (confirm != true) return;
+
+                              setModalState(() => isSubmitting = true);
+
+                              final res = await ApiService.allotSeat(studentId, selectedSeatId!, selectedShiftId);
+
+                              if (ctx.mounted) Navigator.pop(ctx);
+
+                              if (mounted) {
+                                if (res['success'] == true) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(res['message'] ?? 'Seat changed successfully!'),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                  _fetchActiveStudents();
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(res['message'] ?? 'Failed to change seat.'),
+                                      backgroundColor: Colors.redAccent,
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                      icon: isSubmitting
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          : const Icon(Icons.check_circle_rounded, color: Colors.white),
+                      label: Text(
+                        isSubmitting ? 'SAVING...' : 'CONFIRM & CHANGE SEAT',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -939,7 +1225,7 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> with Single
                     SizedBox(height: 12),
                     Text('Recycle Bin is currently empty.', style: TextStyle(color: Colors.grey, fontSize: 16)),
                     SizedBox(height: 6),
-                    Text('Deleted students will remain here for 30 days.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    Text('Deleted students will remain here for 60 days.', style: TextStyle(color: Colors.grey, fontSize: 12)),
                   ],
                 ),
               )

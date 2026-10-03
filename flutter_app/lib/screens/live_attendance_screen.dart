@@ -14,7 +14,6 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen> {
   bool _isLoading = true;
   List<dynamic> _allAttendance = [];
   List<dynamic> _filteredAttendance = [];
-  String _todayDate = '';
   int _totalStudents = 5;
   int _currentlyInside = 0;
   int _absentOutside = 5;
@@ -34,7 +33,6 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen> {
         if (res['success'] == true) {
           setState(() {
             _allAttendance = res['attendance_list'] ?? [];
-            _todayDate = res['date'] ?? '';
             _totalStudents = res['total_students'] is int
                 ? res['total_students']
                 : int.tryParse(res['total_students']?.toString() ?? '0') ?? _allAttendance.length;

@@ -50,7 +50,7 @@ class _ManageShiftsScreenState extends State<ManageShiftsScreen> {
     showDialog(
       context: context,
       builder: (ctx) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
+        // isDark unused
 
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),

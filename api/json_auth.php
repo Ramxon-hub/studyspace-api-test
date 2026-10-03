@@ -68,10 +68,16 @@ try {
                 }
             }
 
+            $linked_students = [];
+            if ($user['role'] === 'parent') {
+                $linked_students = get_parent_linked_students($pdo, $user['id']);
+            }
+
             // Set session variables for authenticated API requests
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['user_name'] = $user['name'];
             $_SESSION['user_role'] = $user['role'];
+            $_SESSION['library_code'] = $current_tenant_code;
             session_write_close();
 
             // Clean up password hash before sending
@@ -87,9 +93,11 @@ try {
                     'phone' => $user['phone'],
                     'role' => $user['role'],
                     'status' => $user['status'],
+                    'library_code' => $current_tenant_code,
                     'preparation_for' => $user['preparation_for'] ?? 'Not specified',
                     'seat_number' => $seat_info,
-                    'shift' => $shift_info
+                    'shift' => $shift_info,
+                    'linked_students' => $linked_students
                 ]
             ]);
         } else {
@@ -134,9 +142,10 @@ try {
         $dummy_seat = $stmt_dummy_seat->fetch();
         $seat_id = $dummy_seat ? $dummy_seat['id'] : 1;
 
+        $cur_date = db_current_date();
         $stmt_alloc = $pdo->prepare("
             INSERT INTO allocations (user_id, seat_id, shift_id, start_date, status, notes)
-            VALUES (?, ?, ?, DATE('now'), 'hold', 'Requested registration by student')
+            VALUES (?, ?, ?, $cur_date, 'hold', 'Requested registration by student')
         ");
         $stmt_alloc->execute([$user_id, $seat_id, $shift_id]);
 

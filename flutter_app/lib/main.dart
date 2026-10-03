@@ -9,10 +9,14 @@ import 'providers/attendance_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/branding_provider.dart';
 
+import 'providers/tenant_provider.dart';
+import 'screens/library_selector_screen.dart';
+
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/student_dashboard_screen.dart';
 import 'screens/admin_dashboard_screen.dart';
+import 'screens/parent_dashboard_screen.dart';
 import 'screens/seat_matrix_screen.dart';
 import 'screens/pending_students_screen.dart';
 import 'screens/live_attendance_screen.dart';
@@ -35,7 +39,7 @@ import 'services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Ensure tenant config is initialized to default (studyspace) if running directly from main.dart
+  // Ensure tenant config is initialized
   TenantConfig.initialize(TenantConfig.current.flavor);
   await NotificationService().init();
 
@@ -58,6 +62,7 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => TenantProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => SeatProvider()),
         ChangeNotifierProvider(create: (_) => AttendanceProvider()),
@@ -74,12 +79,17 @@ class StudyLibraryApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final tenantProvider = Provider.of<TenantProvider>(context);
     final authProvider = Provider.of<AuthProvider>(context);
 
     Widget homeWidget;
-    if (authProvider.isLoggedIn) {
+    if (!tenantProvider.isLibrarySelected) {
+      homeWidget = const LibrarySelectorScreen();
+    } else if (authProvider.isLoggedIn) {
       if (authProvider.currentUser?.role == 'admin') {
         homeWidget = const AdminDashboardScreen();
+      } else if (authProvider.currentUser?.role == 'parent') {
+        homeWidget = ParentDashboardScreen(userData: authProvider.currentUser?.toJson() ?? {});
       } else {
         homeWidget = const StudentDashboardScreen();
       }
@@ -218,6 +228,7 @@ class StudyLibraryApp extends StatelessWidget {
         '/register': (context) => const RegisterScreen(),
         '/student_dashboard': (context) => const StudentDashboardScreen(),
         '/admin_dashboard': (context) => const AdminDashboardScreen(),
+        '/parent_dashboard': (context) => ParentDashboardScreen(userData: Provider.of<AuthProvider>(context, listen: false).currentUser?.toJson() ?? {}),
         '/seat_matrix': (context) => const SeatMatrixScreen(),
         '/pending_students': (context) => const PendingStudentsScreen(),
         '/live_attendance': (context) => const LiveAttendanceScreen(),

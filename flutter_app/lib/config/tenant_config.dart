@@ -75,7 +75,7 @@ class TenantConfig {
     primaryColor: Color(0xFF1D4ED8),
     footerCredit: 'Ramxonwebwork',
     libraryIcon: Icons.menu_book_rounded,
-    apiBaseUrl: 'https://library-management-hmwx.onrender.com',
+    apiBaseUrl: 'https://studyspacetest.co4.in',
   );
 
   static const TenantConfig libraryAbcConfig = TenantConfig(

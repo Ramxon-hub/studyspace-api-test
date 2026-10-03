@@ -107,6 +107,8 @@ if (is_logged_in()) {
                 <?php if (is_logged_in()): ?>
                     <?php if (is_admin()): ?>
                         <li><a href="admin_dashboard.php" class="nav-link"><i class="fas fa-chart-line"></i> Admin Dashboard</a></li>
+                    <?php elseif (is_parent()): ?>
+                        <li><a href="parent_dashboard.php" class="nav-link"><i class="fas fa-user-shield"></i> Parent Portal</a></li>
                     <?php else: ?>
                         <li><a href="student_dashboard.php" class="nav-link"><i class="fas fa-id-card"></i> My Dashboard</a></li>
                     <?php endif; ?>

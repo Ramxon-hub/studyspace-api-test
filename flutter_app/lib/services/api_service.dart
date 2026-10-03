@@ -4,13 +4,33 @@ import '../config/api_config.dart';
 
 class ApiService {
   static const Duration _timeout = Duration(seconds: 15);
+  static String activeLibraryCode = 'LIB001';
+
+  static Map<String, String> get defaultHeaders => {
+    'X-Library-Code': activeLibraryCode,
+  };
+
+  // Fetch Public Tenant Branding & Information
+  static Future<Map<String, dynamic>> getTenantInfo(String libraryCode) async {
+    try {
+      final code = libraryCode.trim().toUpperCase();
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonTenant}?code=$code'),
+        headers: {'X-Library-Code': code},
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'error': 'Connection error or network timeout: $e'};
+    }
+  }
 
   // Login
   static Future<Map<String, dynamic>> login(String email, String password) async {
     try {
       final response = await http.post(
         Uri.parse(ApiConfig.jsonAuth),
-        body: {'action': 'login', 'email': email, 'password': password},
+        headers: defaultHeaders,
+        body: {'action': 'login', 'email': email, 'password': password, 'library_code': activeLibraryCode},
       ).timeout(_timeout);
       return jsonDecode(response.body);
     } catch (e) {
@@ -751,6 +771,69 @@ class ApiService {
       return jsonDecode(response.body);
     } catch (e) {
       return {'success': false, 'message': 'Failed to update student profile: $e'};
+    }
+  }
+
+  // ================= PARENT PORTAL API METHODS ================= //
+
+  // Get Parent Profile & Linked Students
+  static Future<Map<String, dynamic>> getParentProfile() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonParent}?action=parent_profile'),
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to load parent profile: $e'};
+    }
+  }
+
+  // Get Linked Students for Parent
+  static Future<Map<String, dynamic>> getParentLinkedStudents() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonParent}?action=linked_students'),
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to load linked students: $e'};
+    }
+  }
+
+  // Get Full Student Summary for Parent Portal Dashboard
+  static Future<Map<String, dynamic>> getParentStudentFullSummary(int studentId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonParent}?action=student_full_summary&student_id=$studentId'),
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to load student summary: $e'};
+    }
+  }
+
+  // Get Attendance History for Linked Student
+  static Future<Map<String, dynamic>> getParentStudentAttendance(int studentId, {String? month}) async {
+    try {
+      final monthParam = month != null ? '&month=$month' : '';
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonParent}?action=attendance_history&student_id=$studentId$monthParam'),
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to load attendance history: $e'};
+    }
+  }
+
+  // Get 12-Month Fee Billing Matrix for Linked Student
+  static Future<Map<String, dynamic>> getParentStudent12MonthFees(int studentId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonParent}?action=fee_12_month&student_id=$studentId'),
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to load 12-month fee matrix: $e'};
     }
   }
 }

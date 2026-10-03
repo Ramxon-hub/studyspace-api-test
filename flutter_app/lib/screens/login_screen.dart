@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../config/api_config.dart';
 import '../providers/auth_provider.dart';
-import '../providers/branding_provider.dart';
+import '../providers/tenant_provider.dart';
 import '../widgets/branding_logo_widget.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -78,6 +78,8 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         final user = authProvider.currentUser;
         if (user?.role == 'admin') {
           Navigator.of(context).pushReplacementNamed('/admin_dashboard');
+        } else if (user?.role == 'parent') {
+          Navigator.of(context).pushReplacementNamed('/parent_dashboard');
         } else {
           Navigator.of(context).pushReplacementNamed('/student_dashboard');
         }
@@ -188,29 +190,66 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
               children: [
                 const BrandingLogoWidget(size: 68),
                 const SizedBox(height: 12),
-                Consumer<BrandingProvider>(
-                  builder: (context, branding, _) => Text(
-                    branding.appName,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
+                Consumer<TenantProvider>(
+                  builder: (context, tenant, _) => Column(
+                    children: [
+                      Text(
+                        tenant.activeLibraryName,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        tenant.activeTagline,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      InkWell(
+                        onTap: () async {
+                          await Provider.of<TenantProvider>(context, listen: false).changeLibrary();
+                          await Provider.of<AuthProvider>(context, listen: false).logout();
+                        },
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: tenant.activePrimaryColor.withOpacity(0.12),
+                            border: Border.all(color: tenant.activePrimaryColor.withOpacity(0.4)),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.apartment_rounded, size: 14, color: tenant.activePrimaryColor),
+                              const SizedBox(width: 6),
+                              Text(
+                                "Active Library: ${tenant.activeLibraryCode}",
+                                style: TextStyle(
+                                  color: tenant.activePrimaryColor,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Icon(Icons.swap_horiz_rounded, size: 14, color: Color(0xFF64748B)),
+                              const Text(" (Change)", style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 4),
-                Consumer<BrandingProvider>(
-                  builder: (context, branding, _) => Text(
-                    branding.appTagline,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
 
                 // Form Card with Tabs
                 Card(

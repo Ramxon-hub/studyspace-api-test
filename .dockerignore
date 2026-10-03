@@ -1,0 +1,11 @@
+.git
+.gitignore
+.env
+data/*.sqlite*
+data/*.db*
+data/backups/*
+library.db
+flutter_app/
+node_modules/
+scratch/
+*.md

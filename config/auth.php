@@ -46,6 +46,11 @@ function is_admin() {
     return $user && $user['role'] === 'admin';
 }
 
+function is_parent() {
+    $user = current_user();
+    return $user && $user['role'] === 'parent';
+}
+
 function require_login() {
     if (!is_logged_in()) {
         header("Location: login.php");
@@ -58,6 +63,57 @@ function require_admin() {
     if (!is_admin()) {
         header("Location: student_dashboard.php");
         exit();
+    }
+}
+
+function require_parent() {
+    require_login();
+    if (!is_parent()) {
+        header("Location: login.php");
+        exit();
+    }
+}
+
+/**
+ * Fetch all active linked students for a given Parent user ID
+ */
+function get_parent_linked_students($pdo, $parent_id) {
+    if (!$parent_id) return [];
+    try {
+        $stmt = $pdo->prepare("
+            SELECT u.id, u.name, u.email, u.phone, u.father_name, u.status, u.preparation_for, u.created_at,
+                   a.id as allocation_id, s.seat_number, s.row_label, sh.name as shift_name, sh.start_time, sh.end_time, sh.fee_amount
+            FROM parent_student_links l
+            JOIN users u ON l.student_user_id = u.id
+            LEFT JOIN allocations a ON u.id = a.user_id AND (a.status = 'active' OR a.status = 'approved')
+            LEFT JOIN seats s ON a.seat_id = s.id
+            LEFT JOIN shifts sh ON a.shift_id = sh.id
+            WHERE l.parent_user_id = ? AND l.status = 'active' AND (u.is_deleted IS NULL OR u.is_deleted = 0)
+            ORDER BY u.name ASC
+        ");
+        $stmt->execute([(int)$parent_id]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        return [];
+    }
+}
+
+/**
+ * Server-side IDOR Guard: Verify whether a given student record belongs to the active parent account
+ */
+function verify_parent_student_access($pdo, $parent_id, $student_id) {
+    if (!$parent_id || !$student_id) return false;
+    try {
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) FROM parent_student_links l
+            JOIN users u ON l.student_user_id = u.id
+            WHERE l.parent_user_id = ? AND l.student_user_id = ? 
+              AND l.status = 'active' AND (u.is_deleted IS NULL OR u.is_deleted = 0)
+        ");
+        $stmt->execute([(int)$parent_id, (int)$student_id]);
+        return (int)$stmt->fetchColumn() > 0;
+    } catch (Exception $e) {
+        return false;
     }
 }
 
@@ -107,26 +163,42 @@ function get_student_fee_status($pdo, $allocation_id_or_user_id, $start_date = n
         ];
     }
     
-    $user_id = (int)$allocation_id_or_user_id;
+    $param_id = (int)$allocation_id_or_user_id;
+    $user_id = $param_id;
 
-    // Resolve user_id and start_date if an allocation_id was passed
-    $stmt_alloc = $pdo->prepare("SELECT user_id, start_date FROM allocations WHERE id = ?");
-    $stmt_alloc->execute([$allocation_id_or_user_id]);
-    $alloc_row = $stmt_alloc->fetch();
-    
-    if ($alloc_row) {
-        $user_id = (int)$alloc_row['user_id'];
-        if (empty($start_date)) {
+    // Check if param_id is a valid student user_id directly
+    $stmt_check_user = $pdo->prepare("SELECT id FROM users WHERE id = ?");
+    $stmt_check_user->execute([$param_id]);
+    $is_direct_user = (bool)$stmt_check_user->fetchColumn();
+
+    if ($is_direct_user) {
+        $user_id = $param_id;
+        $stmt_alloc = $pdo->prepare("SELECT start_date FROM allocations WHERE user_id = ? AND (status = 'active' OR status = 'approved') ORDER BY id DESC LIMIT 1");
+        $stmt_alloc->execute([$user_id]);
+        $alloc_row = $stmt_alloc->fetch();
+        if ($alloc_row && empty($start_date)) {
             $start_date = $alloc_row['start_date'];
+        }
+    } else {
+        // Resolve user_id and start_date if an allocation_id was passed
+        $stmt_alloc = $pdo->prepare("SELECT user_id, start_date FROM allocations WHERE id = ?");
+        $stmt_alloc->execute([$param_id]);
+        $alloc_row = $stmt_alloc->fetch();
+        if ($alloc_row) {
+            $user_id = (int)$alloc_row['user_id'];
+            if (empty($start_date)) {
+                $start_date = $alloc_row['start_date'];
+            }
         }
     }
 
     // Always resolve to student's earliest allocation start date for cycle calculation
     $stmt_user_start = $pdo->prepare("
-        SELECT COALESCE(MIN(a.start_date), u.created_at, DATE('now'))
+        SELECT COALESCE(MIN(a.start_date), MIN(u.created_at), CURRENT_DATE)
         FROM users u
-        LEFT JOIN allocations a ON u.id = a.user_id AND a.start_date IS NOT NULL AND a.start_date != ''
+        LEFT JOIN allocations a ON u.id = a.user_id AND a.start_date IS NOT NULL
         WHERE u.id = ?
+        GROUP BY u.id, u.created_at
     ");
     $stmt_user_start->execute([$user_id]);
     $earliest_start_date = $stmt_user_start->fetchColumn();

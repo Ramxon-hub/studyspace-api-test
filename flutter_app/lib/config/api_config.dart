@@ -1,14 +1,44 @@
 import 'package:flutter/material.dart';
 import 'tenant_config.dart';
 
+enum ApiEnvironment {
+  deplexoTest,
+  snapDeployTest,
+  productionInfinityFree,
+  cpanelStaging,
+}
+
 class ApiConfig {
-  // Dynamic API Base URL based on active tenant flavor
-  static String get baseUrl => TenantConfig.current.apiBaseUrl;
+  // Configurable API Environment (Default: Deplexo Test Host)
+  static ApiEnvironment activeEnvironment = ApiEnvironment.deplexoTest;
+
+  static const String deplexoTestUrl = 'https://studyspace-api-test.de.deplexo.com';
+  static const String snapDeployTestUrl = 'https://studyspace-api-test-f4e0d.containers.snapdeploy.app';
+  static const String productionInfinityFreeUrl = 'https://studyspace.kesug.com';
+  static const String cpanelStagingUrl = 'https://studyspacetest.co4.in';
+
+  // Centralized Base URL Switcher
+  static String get baseUrl {
+    switch (activeEnvironment) {
+      case ApiEnvironment.deplexoTest:
+        return deplexoTestUrl;
+      case ApiEnvironment.snapDeployTest:
+        return snapDeployTestUrl;
+      case ApiEnvironment.productionInfinityFree:
+        return productionInfinityFreeUrl;
+      case ApiEnvironment.cpanelStaging:
+        return cpanelStagingUrl;
+    }
+  }
 
   static String get jsonAuth => '$baseUrl/api/json_auth.php';
   static String get jsonStudent => '$baseUrl/api/json_student_actions.php';
   static String get jsonAdmin => '$baseUrl/api/json_admin_actions.php';
+  static String get jsonParent => '$baseUrl/api/json_parent_actions.php';
+  static String get jsonTenant => '$baseUrl/api/json_tenant.php';
+  static String get jsonSuperAdmin => '$baseUrl/api/json_super_admin.php';
   static String get seatMatrix => '$baseUrl/api/seat_matrix.php';
+  static String get health => '$baseUrl/api/health.php';
 }
 
 class AppColors {

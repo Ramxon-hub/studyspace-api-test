@@ -127,7 +127,9 @@ try {
         @copy($db_file, $backup_file);
     }
 
-    $pdo->exec("PRAGMA foreign_keys = OFF;");
+    if (!db_is_postgres()) {
+        $pdo->exec("PRAGMA foreign_keys = OFF;");
+    }
     // Ensure base schema exists before restoring snapshot records
     init_database($pdo);
 
@@ -138,13 +140,21 @@ try {
 
         $table_cols = [];
         try {
-            $info = $pdo->query("PRAGMA table_info($table)")->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($info as $col) {
-                $table_cols[] = $col['name'];
+            if (db_is_postgres()) {
+                $stmt_cols = $pdo->prepare("SELECT column_name FROM information_schema.columns WHERE table_name = ?");
+                $stmt_cols->execute([$table]);
+                $table_cols = $stmt_cols->fetchAll(PDO::FETCH_COLUMN);
+            } else {
+                $info = $pdo->query("PRAGMA table_info($table)")->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($info as $col) {
+                    $table_cols[] = $col['name'];
+                }
             }
         } catch (Exception $ex) { continue; }
         
         if (empty($table_cols)) continue;
+
+        $pk_col = ($table === 'system_settings') ? 'setting_key' : 'id';
 
         foreach ($data[$table] as $row) {
             $filtered_row = array_intersect_key($row, array_flip($table_cols));
@@ -155,8 +165,30 @@ try {
             $col_names = implode(',', $cols);
             
             try {
-                $stmt = $pdo->prepare("INSERT OR REPLACE INTO $table ($col_names) VALUES ($placeholders)");
+                if (db_is_postgres()) {
+                    $update_assigns = [];
+                    foreach ($cols as $c) {
+                        if ($c !== $pk_col) {
+                            $update_assigns[] = "$c = EXCLUDED.$c";
+                        }
+                    }
+                    if (!empty($update_assigns)) {
+                        $on_conflict = "ON CONFLICT ($pk_col) DO UPDATE SET " . implode(', ', $update_assigns);
+                    } else {
+                        $on_conflict = "ON CONFLICT ($pk_col) DO NOTHING";
+                    }
+                    $stmt = $pdo->prepare("INSERT INTO $table ($col_names) VALUES ($placeholders) $on_conflict");
+                } else {
+                    $stmt = $pdo->prepare("INSERT OR REPLACE INTO $table ($col_names) VALUES ($placeholders)");
+                }
                 $stmt->execute(array_values($filtered_row));
+            } catch (Exception $ex) {}
+        }
+
+        // Reset sequence for Postgres tables with primary key 'id'
+        if (db_is_postgres() && in_array('id', $table_cols)) {
+            try {
+                $pdo->exec("SELECT setval(pg_get_serial_sequence('$table', 'id'), COALESCE((SELECT MAX(id) FROM $table), 1))");
             } catch (Exception $ex) {}
         }
     }
@@ -165,15 +197,16 @@ try {
     $seat_a04_id = (int)$pdo->query("SELECT id FROM seats WHERE seat_number = 'A-04'")->fetchColumn();
     if ($seat_a04_id <= 0) $seat_a04_id = 4;
 
+    $cur_date = db_current_date();
     $pdo->prepare("UPDATE allocations SET status = 'cancelled' WHERE user_id = 6 AND status = 'active'")->execute();
-    $pdo->prepare("INSERT INTO allocations (user_id, seat_id, shift_id, start_date, status, notes) VALUES (6, ?, 1, DATE('now'), 'active', 'Restored to A-04')")->execute([$seat_a04_id]);
+    $pdo->prepare("INSERT INTO allocations (user_id, seat_id, shift_id, start_date, status, notes) VALUES (6, ?, 1, $cur_date, 'active', 'Restored to A-04')")->execute([$seat_a04_id]);
 
-    $pdo->exec("PRAGMA foreign_keys = ON;");
+    if (!db_is_postgres()) {
+        $pdo->exec("PRAGMA foreign_keys = ON;");
+    }
 
     // Ensure production system identity marker is explicitly written
-    $pdo->exec("CREATE TABLE IF NOT EXISTS system_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT)");
-    $stmt_sys = $pdo->prepare("INSERT OR REPLACE INTO system_settings (setting_key, setting_value) VALUES ('system_identity', ?)");
-    $stmt_sys->execute([PRODUCTION_IDENTITY_MARKER]);
+    db_upsert_system_setting($pdo, 'system_identity', PRODUCTION_IDENTITY_MARKER);
 
     // Run schema migrations to ensure unique indexes are active
     run_migrations($pdo);

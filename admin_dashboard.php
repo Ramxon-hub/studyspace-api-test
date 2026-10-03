@@ -41,9 +41,10 @@ $stmt_students = $pdo->query("
 ");
 $students = $stmt_students->fetchAll();
 
-// Fetch Recycle Bin Deleted Students (Kept for 30 days)
+// Fetch Recycle Bin Deleted Students (Kept for 60 days)
+$days_left_expr = db_days_left_expression('u.deleted_at', $pdo);
 $stmt_bin = $pdo->query("
-    SELECT u.*, MAX(0, CAST(30 - (julianday('now') - julianday(u.deleted_at)) AS INTEGER)) as days_left
+    SELECT u.*, $days_left_expr as days_left
     FROM users u
     WHERE u.role = 'student' AND u.is_deleted = 1
     ORDER BY u.deleted_at DESC
@@ -74,9 +75,11 @@ $stmt_att_full = $pdo->query("
 $attendance_roster = $stmt_att_full->fetchAll(PDO::FETCH_ASSOC);
 // Auto-purge notifications & chat messages older than 48 hours, complaints older than 30 days
 try {
-    $pdo->exec("DELETE FROM complaints WHERE created_at IS NOT NULL AND created_at != '' AND created_at < DATETIME('now', '-30 days')");
-    $pdo->exec("DELETE FROM notifications WHERE created_at IS NOT NULL AND created_at != '' AND created_at < DATETIME('now', '-48 hours')");
-    $pdo->exec("DELETE FROM chat_messages WHERE created_at IS NOT NULL AND created_at != '' AND created_at < DATETIME('now', '-48 hours')");
+    $sub_30_days = db_now_sub_days(30);
+    $sub_48_hrs = db_now_sub_hours(48);
+    $pdo->exec("DELETE FROM complaints WHERE created_at IS NOT NULL AND created_at != '' AND created_at < $sub_30_days");
+    $pdo->exec("DELETE FROM notifications WHERE created_at IS NOT NULL AND created_at != '' AND created_at < $sub_48_hrs");
+    $pdo->exec("DELETE FROM chat_messages WHERE created_at IS NOT NULL AND created_at != '' AND created_at < $sub_48_hrs");
 } catch (Exception $e) {}
 
 // Fetch Complaints
@@ -98,11 +101,70 @@ $stmt_notifs = $pdo->query("
 $sent_notifications = $stmt_notifs->fetchAll();
 
 $active_tab = $_GET['tab'] ?? 'seatmap';
+
+// Phase 14 Customer Journey: Master DB Subscription & Billing Status
+require_once __DIR__ . '/config/master_db.php';
+$tenant_code = $_SESSION['library_code'] ?? 'LIB001';
+$master_pdo_admin = get_master_pdo();
+$stmt_sub_admin = $master_pdo_admin->prepare("
+    SELECT l.name as library_name, s.plan_name, s.max_students, s.valid_until, s.status as sub_status,
+           b.logo_url, b.primary_color, b.contact_phone, b.tagline
+    FROM libraries l
+    LEFT JOIN subscriptions s ON l.library_code = s.library_code
+    LEFT JOIN library_branding b ON l.library_code = b.library_code
+    WHERE l.library_code = ?
+");
+$stmt_sub_admin->execute([$tenant_code]);
+$tenant_sub = $stmt_sub_admin->fetch(PDO::FETCH_ASSOC) ?: [];
+
+$tenant_invoices = $master_pdo_admin->query("SELECT * FROM invoices WHERE library_code = '$tenant_code' ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC) ?: [];
+$tenant_payments = $master_pdo_admin->query("SELECT * FROM manual_payments WHERE library_code = '$tenant_code' ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC) ?: [];
+$tenant_renewal_reqs = $master_pdo_admin->query("SELECT * FROM subscription_renewal_requests WHERE library_code = '$tenant_code' ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+// Support Settings
+$rows_supp = $master_pdo_admin->query("SELECT setting_key, setting_value FROM support_settings")->fetchAll(PDO::FETCH_ASSOC) ?: [];
+$tenant_supp = [];
+foreach ($rows_supp as $r) { $tenant_supp[$r['setting_key']] = $r['setting_value']; }
+
+$sub_valid_until = $tenant_sub['valid_until'] ?? date('Y-m-d');
+$sub_days_remaining = max(0, (int)ceil((strtotime($sub_valid_until) - strtotime(date('Y-m-d'))) / 86400));
+$sub_expiry_state = 'ACTIVE';
+if (($tenant_sub['status'] ?? '') === 'suspended') {
+    $sub_expiry_state = 'SUSPENDED';
+} elseif ($sub_days_remaining <= 0 || ($tenant_sub['sub_status'] ?? '') === 'expired') {
+    $sub_expiry_state = 'EXPIRED';
+} elseif ($sub_days_remaining <= 7) {
+    $sub_expiry_state = 'CRITICAL';
+} elseif ($sub_days_remaining <= 30) {
+    $sub_expiry_state = 'EXPIRING_SOON';
+}
 ?>
 
 <script>
     const isAdmin = true;
 </script>
+
+<?php if ($sub_expiry_state === 'EXPIRING_SOON' || $sub_expiry_state === 'CRITICAL'): ?>
+    <div class="card" style="border-left: 4px solid #f59e0b; background: rgba(245, 158, 11, 0.08); margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div>
+                <h4 style="color: #f59e0b; font-size: 15px; margin-bottom: 4px;"><i class="fas fa-exclamation-triangle"></i> Subscription Expiring Soon (<?php echo $sub_days_remaining; ?> Days Remaining)</h4>
+                <p style="font-size: 13px; color: var(--text-muted);">Your StudySpace <?php echo htmlspecialchars($tenant_sub['plan_name'] ?? 'MONTHLY'); ?> subscription expires on <strong><?php echo htmlspecialchars($sub_valid_until); ?></strong>. Please submit a renewal request or contact administrator to maintain continuous service.</p>
+            </div>
+            <a href="?tab=billing" class="btn btn-warning btn-sm"><i class="fas fa-crown"></i> View Subscription & Renew</a>
+        </div>
+    </div>
+<?php elseif ($sub_expiry_state === 'EXPIRED' || $sub_expiry_state === 'SUSPENDED'): ?>
+    <div class="card" style="border-left: 4px solid #ef4444; background: rgba(239, 68, 68, 0.08); margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div>
+                <h4 style="color: #ef4444; font-size: 15px; margin-bottom: 4px;"><i class="fas fa-ban"></i> Subscription Expired / Suspended</h4>
+                <p style="font-size: 13px; color: var(--text-muted);">Your StudySpace subscription expired on <strong><?php echo htmlspecialchars($sub_valid_until); ?></strong>. Commercial features require an active subscription.</p>
+            </div>
+            <a href="?tab=billing" class="btn btn-danger btn-sm"><i class="fas fa-crown"></i> Renew Subscription Now</a>
+        </div>
+    </div>
+<?php endif; ?>
 
 <!-- Welcome Admin Banner -->
 <div class="card" style="border-left: 4px solid var(--accent-primary);">
@@ -194,10 +256,16 @@ $active_tab = $_GET['tab'] ?? 'seatmap';
             <i class="fas fa-cog"></i> Shift Timings & Backups
         </button>
         <button class="tab-btn <?php echo $active_tab === 'recyclebin' ? 'active' : ''; ?>" data-tab="tabAdminRecycleBin">
-            <i class="fas fa-trash-alt" style="color: #ef4444;"></i> Recycle Bin (30-Day Purge)
+            <i class="fas fa-trash-alt" style="color: #ef4444;"></i> Recycle Bin (60-Day Purge)
             <?php if (!empty($recycle_bin_students)): ?>
                 <span class="badge badge-danger" style="margin-left: 4px;"><?php echo count($recycle_bin_students); ?></span>
             <?php endif; ?>
+        </button>
+        <button class="tab-btn <?php echo $active_tab === 'parents' ? 'active' : ''; ?>" data-tab="tabAdminParents">
+            <i class="fas fa-users-cog" style="color: #8b5cf6;"></i> Parent Management
+        </button>
+        <button class="tab-btn <?php echo $active_tab === 'billing' ? 'active' : ''; ?>" data-tab="tabAdminBilling">
+            <i class="fas fa-crown" style="color: #f59e0b;"></i> Subscription & Billing
         </button>
     </div>
 
@@ -867,18 +935,18 @@ $active_tab = $_GET['tab'] ?? 'seatmap';
         </div>
     </div>
 
-    <!-- TAB 9: RECYCLE BIN & SOFT-DELETED RECORDS (30 DAYS HOLD) -->
+    <!-- TAB 9: RECYCLE BIN & SOFT-DELETED RECORDS (60 DAYS HOLD) -->
     <div id="tabAdminRecycleBin" class="tab-pane <?php echo $active_tab === 'recyclebin' ? 'active' : ''; ?>">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;">
             <div>
                 <h3><i class="fas fa-trash-restore" style="color: #ef4444;"></i> Recycle Bin / Student Data Recovery</h3>
                 <p style="font-size: 0.85rem; color: var(--text-muted);">
-                    Student records deleted by Admin are safely stored here for <strong>30 days</strong>. You can restore them to Active status or permanently erase them.
+                    Student records deleted by Admin are safely stored here for <strong>60 days</strong>. You can restore them to Active status or permanently erase them.
                 </p>
             </div>
             <div>
                 <span class="badge badge-info" style="font-size: 0.9rem; padding: 6px 12px;">
-                    <i class="fas fa-history"></i> 30-Day Automatic Data Purge Active
+                    <i class="fas fa-history"></i> 60-Day Automatic Data Purge Active
                 </span>
             </div>
         </div>
@@ -937,7 +1005,416 @@ $active_tab = $_GET['tab'] ?? 'seatmap';
             </table>
         </div>
     </div>
+
+    <!-- TAB: PARENT PORTAL MANAGEMENT -->
+    <div id="tabAdminParents" class="tab-pane <?php echo $active_tab === 'parents' ? 'active' : ''; ?>">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+            <div>
+                <h3><i class="fas fa-users-cog" style="color: #8b5cf6;"></i> Parent Accounts & Student Links</h3>
+                <p style="color: var(--text-muted); font-size: 0.85rem;">
+                    Manage parent accounts, link parents to students, and control read-only portal access.
+                </p>
+            </div>
+            <button class="btn btn-primary" onclick="openModal('modalAddParent')">
+                <i class="fas fa-user-plus"></i> Create New Parent Account
+            </button>
+        </div>
+
+        <?php
+        $parents_list = $pdo->query("
+            SELECT id, name, email, phone, status, created_at
+            FROM users
+            WHERE role = 'parent' AND (is_deleted IS NULL OR is_deleted = 0)
+            ORDER BY id DESC
+        ")->fetchAll(PDO::FETCH_ASSOC);
+        ?>
+
+        <div class="table-responsive">
+            <table class="custom-table">
+                <thead>
+                    <tr>
+                        <th>Parent Details</th>
+                        <th>Mobile Phone</th>
+                        <th>Account Status</th>
+                        <th>Linked Student(s)</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($parents_list)): ?>
+                        <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 30px;">No parent accounts created yet. Click "Create New Parent Account" to add one.</td></tr>
+                    <?php else: ?>
+                        <?php foreach ($parents_list as $par): 
+                            $linked_stus = get_parent_linked_students($pdo, $par['id']);
+                        ?>
+                            <tr>
+                                <td>
+                                    <strong><?php echo htmlspecialchars($par['name']); ?></strong><br>
+                                    <small style="color: var(--text-muted);"><?php echo htmlspecialchars($par['email']); ?></small>
+                                </td>
+                                <td><?php echo htmlspecialchars($par['phone'] ?: 'N/A'); ?></td>
+                                <td>
+                                    <?php if ($par['status'] === 'approved' || $par['status'] === 'active'): ?>
+                                        <span class="badge badge-success"><i class="fas fa-check-circle"></i> Active</span>
+                                    <?php else: ?>
+                                        <span class="badge badge-danger"><i class="fas fa-ban"></i> Disabled</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if (empty($linked_stus)): ?>
+                                        <span style="color: var(--text-muted); font-size: 0.85rem;">No students linked</span>
+                                    <?php else: ?>
+                                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                                            <?php foreach ($linked_stus as $ls): ?>
+                                                <div style="display: flex; align-items: center; justify-content: space-between; background: var(--bg-surface-elevated, #f1f5f9); padding: 4px 8px; border-radius: 4px; font-size: 0.82rem;">
+                                                    <span>
+                                                        <i class="fas fa-user-graduate" style="color: var(--accent-primary);"></i>
+                                                        <strong><?php echo htmlspecialchars($ls['name']); ?></strong>
+                                                        <?php if (!empty($ls['seat_number'])): ?>
+                                                            <small style="color: var(--text-muted);">(Seat <?php echo htmlspecialchars($ls['seat_number']); ?>)</small>
+                                                        <?php endif; ?>
+                                                    </span>
+                                                    <form action="api/json_admin_actions.php" method="POST" style="display:inline; margin-left: 8px;" onsubmit="return confirm('Unlink <?php echo addslashes($ls['name']); ?> from <?php echo addslashes($par['name']); ?>?');">
+                                                        <input type="hidden" name="action" value="unlink_parent_student">
+                                                        <input type="hidden" name="parent_id" value="<?php echo $par['id']; ?>">
+                                                        <input type="hidden" name="student_id" value="<?php echo $ls['id']; ?>">
+                                                        <button type="submit" style="background:none; border:none; color:#ef4444; cursor:pointer;" title="Unlink Student">&times;</button>
+                                                    </form>
+                                                </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                                        <button class="btn btn-secondary btn-sm" onclick="openLinkStudentModal(<?php echo $par['id']; ?>, '<?php echo addslashes($par['name']); ?>')">
+                                            <i class="fas fa-link"></i> Link Student
+                                        </button>
+                                        <form action="api/json_admin_actions.php" method="POST" style="display:inline;">
+                                            <input type="hidden" name="action" value="toggle_parent_status">
+                                            <input type="hidden" name="parent_id" value="<?php echo $par['id']; ?>">
+                                            <button type="submit" class="btn <?php echo ($par['status'] === 'approved' || $par['status'] === 'active') ? 'btn-danger' : 'btn-success'; ?> btn-sm">
+                                                <?php echo ($par['status'] === 'approved' || $par['status'] === 'active') ? 'Disable' : 'Enable'; ?>
+                                            </button>
+                                        </form>
+                                        <button class="btn btn-warning btn-sm" onclick="openResetParentPassModal(<?php echo $par['id']; ?>, '<?php echo addslashes($par['name']); ?>')">
+                                            <i class="fas fa-key"></i> Reset Pass
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TAB: SUBSCRIPTION & BILLING (Phase 14 Customer Journey) -->
+    <div id="tabAdminBilling" class="tab-pane <?php echo $active_tab === 'billing' ? 'active' : ''; ?>">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+            <div>
+                <h3><i class="fas fa-crown" style="color: #f59e0b;"></i> StudySpace Subscription & Commercial Billing Portal</h3>
+                <p style="color: var(--text-muted); font-size: 0.85rem;">
+                    View your library's current subscription, billing history, invoices, and request renewals.
+                </p>
+            </div>
+            <button class="btn btn-warning" onclick="openRequestRenewalModal()">
+                <i class="fas fa-paper-plane"></i> Request Subscription Renewal
+            </button>
+        </div>
+
+        <!-- Subscription Overview Card -->
+        <div class="grid-4" style="margin-bottom: 24px;">
+            <div class="stat-card">
+                <div class="stat-icon" style="background: rgba(245, 158, 11, 0.1); color: #f59e0b;">
+                    <i class="fas fa-crown"></i>
+                </div>
+                <div>
+                    <div class="stat-value"><?php echo htmlspecialchars($tenant_sub['plan_name'] ?? 'MONTHLY'); ?></div>
+                    <div class="stat-label">SaaS Subscription Plan</div>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-icon" style="background: <?php echo ($sub_expiry_state === 'ACTIVE') ? 'rgba(16, 185, 129, 0.1)' : (($sub_expiry_state === 'EXPIRING_SOON') ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)'); ?>; color: <?php echo ($sub_expiry_state === 'ACTIVE') ? '#10b981' : (($sub_expiry_state === 'EXPIRING_SOON') ? '#f59e0b' : '#ef4444'); ?>;">
+                    <i class="fas fa-shield-alt"></i>
+                </div>
+                <div>
+                    <div class="stat-value"><?php echo $sub_expiry_state; ?></div>
+                    <div class="stat-label">Subscription Status</div>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-icon" style="background: rgba(2, 132, 199, 0.1); color: #0284c7;">
+                    <i class="fas fa-calendar-alt"></i>
+                </div>
+                <div>
+                    <div class="stat-value"><?php echo htmlspecialchars($sub_valid_until); ?></div>
+                    <div class="stat-label">Valid Expiry Date (<?php echo $sub_days_remaining; ?> Days Left)</div>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-icon" style="background: rgba(139, 92, 246, 0.1); color: #8b5cf6;">
+                    <i class="fas fa-users"></i>
+                </div>
+                <div>
+                    <div class="stat-value"><?php echo (int)($tenant_sub['max_students'] ?? 100); ?> Students</div>
+                    <div class="stat-label">Licensed Capacity Limit</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Contact Support Information Card -->
+        <div class="card" style="border-left: 4px solid var(--accent-primary); margin-bottom: 24px;">
+            <h4><i class="fas fa-headset" style="color: var(--accent-primary);"></i> StudySpace Billing Support & Renewal Contact</h4>
+            <p style="font-size: 0.9rem; color: var(--text-muted); margin-top: 6px;">
+                <?php echo htmlspecialchars($tenant_supp['support_message'] ?? 'Please contact StudySpace billing administrator to make manual subscription payments via Cash, UPI, or Bank Transfer.'); ?>
+            </p>
+            <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-top: 12px; font-size: 0.85rem;">
+                <div><i class="fas fa-phone-alt" style="color:#10b981;"></i> <strong>Phone:</strong> <?php echo htmlspecialchars($tenant_supp['support_phone'] ?? '+91 98765 43210'); ?></div>
+                <div><i class="fab fa-whatsapp" style="color:#25d366;"></i> <strong>WhatsApp:</strong> <?php echo htmlspecialchars($tenant_supp['support_whatsapp'] ?? '+91 98765 43210'); ?></div>
+                <div><i class="fas fa-envelope" style="color:#3b82f6;"></i> <strong>Email:</strong> <?php echo htmlspecialchars($tenant_supp['support_email'] ?? 'support@studyspace.com'); ?></div>
+            </div>
+        </div>
+
+        <!-- Invoices Table -->
+        <h4 style="margin-bottom: 12px;"><i class="fas fa-file-invoice"></i> Invoices for Library <code><?php echo htmlspecialchars($tenant_code); ?></code></h4>
+        <div class="table-responsive" style="margin-bottom: 24px;">
+            <table class="custom-table">
+                <thead>
+                    <tr>
+                        <th>Invoice #</th>
+                        <th>Plan</th>
+                        <th>Amount</th>
+                        <th>Invoice Date</th>
+                        <th>Due Date</th>
+                        <th>Status</th>
+                        <th>Paid Date</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($tenant_invoices)): ?>
+                        <tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 20px;">No invoice records found.</td></tr>
+                    <?php else: ?>
+                        <?php foreach ($tenant_invoices as $ti): ?>
+                            <tr>
+                                <td><strong><?php echo htmlspecialchars($ti['invoice_number']); ?></strong></td>
+                                <td><span class="badge badge-info"><?php echo htmlspecialchars($ti['plan_id']); ?></span></td>
+                                <td><strong>₹<?php echo number_format($ti['amount'], 2); ?></strong></td>
+                                <td><?php echo htmlspecialchars($ti['invoice_date']); ?></td>
+                                <td><?php echo htmlspecialchars($ti['due_date']); ?></td>
+                                <td>
+                                    <?php $tist = strtoupper($ti['status']); ?>
+                                    <span class="badge <?php echo $tist === 'PAID' ? 'badge-success' : 'badge-warning'; ?>"><?php echo $tist; ?></span>
+                                </td>
+                                <td><?php echo htmlspecialchars($ti['paid_at'] ?? 'Pending'); ?></td>
+                                <td>
+                                    <button class="btn btn-secondary btn-sm" onclick="viewReceiptAdmin('<?php echo htmlspecialchars($ti['invoice_number'], ENT_QUOTES); ?>')">
+                                        <i class="fas fa-print"></i> View / Print Invoice
+                                    </button>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Payments Table -->
+        <h4 style="margin-bottom: 12px;"><i class="fas fa-receipt"></i> Payment Records for <code><?php echo htmlspecialchars($tenant_code); ?></code></h4>
+        <div class="table-responsive" style="margin-bottom: 24px;">
+            <table class="custom-table">
+                <thead>
+                    <tr>
+                        <th>Payment ID</th>
+                        <th>Amount</th>
+                        <th>Payment Method</th>
+                        <th>Reference / UTR</th>
+                        <th>Payment Date</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($tenant_payments)): ?>
+                        <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">No payment records found.</td></tr>
+                    <?php else: ?>
+                        <?php foreach ($tenant_payments as $tp): ?>
+                            <tr>
+                                <td><code><?php echo htmlspecialchars($tp['payment_id']); ?></code></td>
+                                <td><strong>₹<?php echo number_format($tp['amount'], 2); ?></strong></td>
+                                <td><span class="badge badge-info"><?php echo htmlspecialchars($tp['payment_method']); ?></span></td>
+                                <td><code><?php echo htmlspecialchars($tp['payment_reference'] ?: 'N/A'); ?></code></td>
+                                <td><?php echo htmlspecialchars($tp['payment_date']); ?></td>
+                                <td>
+                                    <?php $tpst = strtoupper($tp['status']); ?>
+                                    <span class="badge <?php echo $tpst === 'VERIFIED' ? 'badge-success' : ($tpst === 'PENDING' ? 'badge-warning' : 'badge-danger'); ?>"><?php echo $tpst; ?></span>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Renewal Requests Table -->
+        <h4 style="margin-bottom: 12px;"><i class="fas fa-history"></i> Renewal Requests Submitted</h4>
+        <div class="table-responsive">
+            <table class="custom-table">
+                <thead>
+                    <tr>
+                        <th>Request ID</th>
+                        <th>Requested Plan</th>
+                        <th>Requested Date</th>
+                        <th>Status</th>
+                        <th>Admin Note</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($tenant_renewal_reqs)): ?>
+                        <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 20px;">No renewal requests submitted yet. Click "Request Subscription Renewal" above.</td></tr>
+                    <?php else: ?>
+                        <?php foreach ($tenant_renewal_reqs as $tr): ?>
+                            <tr>
+                                <td><code><?php echo htmlspecialchars($tr['request_id']); ?></code></td>
+                                <td><span class="badge badge-info"><?php echo htmlspecialchars($tr['requested_plan']); ?></span></td>
+                                <td><?php echo htmlspecialchars($tr['created_at']); ?></td>
+                                <td>
+                                    <?php $trst = strtoupper($tr['status']); ?>
+                                    <span class="badge <?php echo $trst === 'COMPLETED' ? 'badge-success' : ($trst === 'PENDING' ? 'badge-warning' : 'badge-info'); ?>"><?php echo $trst; ?></span>
+                                </td>
+                                <td><?php echo htmlspecialchars($tr['admin_note'] ?? 'N/A'); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
+</div>
+
+<!-- MODAL: CREATE PARENT ACCOUNT -->
+<div id="modalAddParent" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-user-plus" style="color: #8b5cf6;"></i> Create Parent Account</h3>
+            <button class="modal-close">&times;</button>
+        </div>
+        <form action="api/json_admin_actions.php" method="POST">
+            <input type="hidden" name="action" value="create_parent">
+
+            <div class="form-group">
+                <label class="form-label"><i class="fas fa-user"></i> Parent Full Name</label>
+                <input type="text" name="name" class="form-control" placeholder="e.g. Rajesh Kumar" required>
+            </div>
+
+            <div class="grid-2">
+                <div class="form-group">
+                    <label class="form-label"><i class="fas fa-envelope"></i> Email Address (Login ID)</label>
+                    <input type="email" name="email" class="form-control" placeholder="parent@example.com" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label"><i class="fas fa-phone"></i> Mobile Phone</label>
+                    <input type="text" name="phone" class="form-control" placeholder="9876543210" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label"><i class="fas fa-lock"></i> Account Password</label>
+                <input type="password" name="password" class="form-control" placeholder="Enter secure password" required>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label"><i class="fas fa-user-graduate"></i> Link Initial Student(s)</label>
+                <select name="student_ids[]" class="form-control" multiple style="height: 120px;">
+                    <?php
+                    $all_stus = $pdo->query("SELECT id, name, email, phone FROM users WHERE role = 'student' AND (is_deleted IS NULL OR is_deleted = 0) ORDER BY name ASC")->fetchAll();
+                    foreach ($all_stus as $as) {
+                        echo '<option value="' . $as['id'] . '">' . htmlspecialchars($as['name']) . ' (' . htmlspecialchars($as['phone'] ?: $as['email']) . ')</option>';
+                    }
+                    ?>
+                </select>
+                <small style="color: var(--text-muted);">Hold Ctrl (or Cmd) to select multiple students.</small>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+                <button type="button" class="btn btn-secondary modal-close">Cancel</button>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-check-circle"></i> Create Parent Account</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- MODAL: LINK STUDENT TO PARENT -->
+<div id="modalLinkStudent" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-link" style="color: #8b5cf6;"></i> Link Student to Parent (<span id="linkParentName"></span>)</h3>
+            <button class="modal-close">&times;</button>
+        </div>
+        <form action="api/json_admin_actions.php" method="POST">
+            <input type="hidden" name="action" value="link_parent_student">
+            <input type="hidden" name="parent_id" id="linkParentId">
+
+            <div class="form-group">
+                <label class="form-label">Select Student to Link</label>
+                <select name="student_id" class="form-control" required>
+                    <option value="">-- Choose Student --</option>
+                    <?php foreach ($all_stus as $as): ?>
+                        <option value="<?php echo $as['id']; ?>"><?php echo htmlspecialchars($as['name']); ?> (<?php echo htmlspecialchars($as['phone'] ?: $as['email']); ?>)</option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+                <button type="button" class="btn btn-secondary modal-close">Cancel</button>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-link"></i> Confirm Link</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- MODAL: RESET PARENT PASSWORD -->
+<div id="modalResetParentPass" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><i class="fas fa-key" style="color: #f59e0b;"></i> Reset Password (<span id="resetParentName"></span>)</h3>
+            <button class="modal-close">&times;</button>
+        </div>
+        <form action="api/json_admin_actions.php" method="POST">
+            <input type="hidden" name="action" value="reset_parent_password">
+            <input type="hidden" name="parent_id" id="resetParentId">
+
+            <div class="form-group">
+                <label class="form-label">New Password</label>
+                <input type="password" name="new_password" class="form-control" placeholder="Enter new password" required>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+                <button type="button" class="btn btn-secondary modal-close">Cancel</button>
+                <button type="submit" class="btn btn-warning"><i class="fas fa-key"></i> Update Password</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openLinkStudentModal(parentId, parentName) {
+    document.getElementById('linkParentId').value = parentId;
+    document.getElementById('linkParentName').innerText = parentName;
+    openModal('modalLinkStudent');
+}
+
+function openResetParentPassModal(parentId, parentName) {
+    document.getElementById('resetParentId').value = parentId;
+    document.getElementById('resetParentName').innerText = parentName;
+    openModal('modalResetParentPass');
+}
+</script>
 
 <!-- MODAL: EDIT SHIFT -->
 <div id="modalEditShift" class="modal-overlay">
@@ -1537,7 +2014,115 @@ function openStudentDetailsModal(stu) {
     `;
     openModal('modalStudentDetails');
 }
+
+function openRequestRenewalModal() {
+    openModal('modalRequestRenewal');
+}
+
+async function submitRenewalRequest(e) {
+    e.preventDefault();
+    const plan = document.getElementById('rr_requested_plan').value;
+    const notes = document.getElementById('rr_notes').value;
+
+    const params = new URLSearchParams();
+    params.append('action', 'create_renewal_request');
+    params.append('requested_plan', plan);
+    params.append('notes', notes);
+
+    const res = await fetch('api/json_tenant_billing.php', {
+        method: 'POST',
+        body: params
+    });
+    const data = await res.json();
+    if (data.success) {
+        alert(data.message);
+        closeModal('modalRequestRenewal');
+        location.reload();
+    } else {
+        alert('Error: ' + data.error);
+    }
+}
+
+async function viewReceiptAdmin(invNo) {
+    if (!invNo) return;
+    const res = await fetch(`api/json_tenant_billing.php?action=library_invoices`);
+    const data = await res.json();
+    let inv = null;
+    if (data.success && data.invoices) {
+        inv = data.invoices.find(i => i.invoice_number === invNo);
+    }
+    if (!inv) {
+        alert("Invoice not found: " + invNo);
+        return;
+    }
+
+    const html = `
+        <div style="padding:20px; border:1px solid #cbd5e1; border-radius:10px; background:#fff; color:#0f172a;">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #3b82f6; padding-bottom:12px; margin-bottom:16px;">
+                <div>
+                    <h2 style="color:#3b82f6; margin:0;">StudySpace Multi-Tenant SaaS</h2>
+                    <p style="font-size:12px; color:#64748b; margin:2px 0 0 0;">Official Subscription Invoice / Receipt</p>
+                </div>
+                <span class="badge ${inv.status === 'PAID' ? 'badge-success' : 'badge-warning'}" style="font-size:14px; padding:6px 12px;">${inv.status}</span>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; font-size:13px; margin-bottom:16px;">
+                <p><strong>Invoice Number:</strong> ${inv.invoice_number}</p>
+                <p><strong>Library Code:</strong> ${inv.library_code}</p>
+                <p><strong>SaaS Plan:</strong> ${inv.plan_id}</p>
+                <p><strong>Amount:</strong> ₹${parseFloat(inv.amount).toFixed(2)} ${inv.currency || 'INR'}</p>
+                <p><strong>Invoice Date:</strong> ${inv.invoice_date}</p>
+                <p><strong>Due Date:</strong> ${inv.due_date}</p>
+                <p><strong>Payment Method:</strong> ${inv.payment_method || 'Manual'}</p>
+                <p><strong>Payment Ref / UTR:</strong> ${inv.payment_reference || 'N/A'}</p>
+                <p><strong>Paid At:</strong> ${inv.paid_at || 'Pending Verification'}</p>
+            </div>
+            <div style="text-align:right; border-top:1px solid #cbd5e1; padding-top:12px;">
+                <button onclick="window.print()" class="btn btn-primary btn-sm"><i class="fas fa-print"></i> Print Invoice / Receipt</button>
+            </div>
+        </div>
+    `;
+    const win = window.open('', '_blank');
+    win.document.write(`<html><head><title>Invoice ${inv.invoice_number}</title><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><style>body{font-family:sans-serif; padding:20px;}</style></head><body>${html}</body></html>`);
+    win.document.close();
+}
 </script>
+
+<!-- Modal: Request Subscription Renewal (Phase 14) -->
+<div id="modalRequestRenewal" class="modal">
+    <div class="modal-content" style="max-width: 520px;">
+        <div class="modal-header">
+            <h3><i class="fas fa-paper-plane" style="color: #f59e0b;"></i> Request Subscription Renewal</h3>
+            <button type="button" class="modal-close" onclick="closeModal('modalRequestRenewal')">&times;</button>
+        </div>
+        <form onsubmit="submitRenewalRequest(event)">
+            <div class="modal-body">
+                <div class="form-group" style="margin-bottom: 14px;">
+                    <label>Library Code</label>
+                    <input type="text" value="<?php echo htmlspecialchars($tenant_code); ?>" class="form-control" readonly>
+                </div>
+                <div class="form-group" style="margin-bottom: 14px;">
+                    <label>Requested SaaS Plan</label>
+                    <select id="rr_requested_plan" class="form-control" required>
+                        <option value="YEARLY" selected>YEARLY (12 Months - Best Value)</option>
+                        <option value="MONTHLY">MONTHLY (1 Month Standard)</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom: 14px;">
+                    <label>Notes for StudySpace Administrator (Optional)</label>
+                    <textarea id="rr_notes" class="form-control" rows="3" placeholder="e.g. Please send payment details for bank transfer / UPI QR."></textarea>
+                </div>
+                <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid var(--accent-primary); padding: 12px; border-radius: 6px; font-size: 0.85rem; color: var(--text-muted);">
+                    <i class="fas fa-info-circle" style="color: var(--accent-primary);"></i>
+                    Submitting this request alerts the StudySpace billing administrator. You will be contacted with manual payment instructions (UPI / Cash / Bank Transfer).
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('modalRequestRenewal')">Cancel</button>
+                <button type="submit" class="btn btn-warning"><i class="fas fa-paper-plane"></i> Submit Renewal Request</button>
+            </div>
+        </form>
+    </div>
+</div>
 
 <!-- Modal: Student Profile Full Details -->
 <div id="modalStudentDetails" class="modal">

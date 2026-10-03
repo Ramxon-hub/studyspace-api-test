@@ -188,7 +188,7 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void logout() async {
+  Future<void> logout() async {
     _currentUser = null;
     NativeNotificationService.stopNativeService();
     try {

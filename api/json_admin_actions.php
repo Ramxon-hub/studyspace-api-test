@@ -420,7 +420,8 @@ try {
 
         // Auto-delete notifications older than 2 days (48 hours)
         try {
-            $pdo->exec("DELETE FROM notifications WHERE created_at < DATETIME('now', '-2 days')");
+            $sub_2_days = db_now_sub_days(2);
+            $pdo->exec("DELETE FROM notifications WHERE created_at < $sub_2_days");
         } catch (Exception $e) {}
 
         $stmt_ins = $pdo->prepare("INSERT INTO notifications (title, message, user_id) VALUES (?, ?, ?)");
@@ -789,6 +790,11 @@ try {
             exit();
         }
 
+        if (db_is_postgres()) {
+            echo json_encode(['success' => false, 'message' => 'SQLite file-based database restore is not applicable in PostgreSQL mode.']);
+            exit();
+        }
+
         if (isset($_FILES['backup_file']) && $_FILES['backup_file']['error'] === UPLOAD_ERR_OK) {
             $tmp_name = $_FILES['backup_file']['tmp_name'];
             $db_file = DB_PATH;
@@ -860,9 +866,11 @@ try {
 
     } elseif ($action === 'get_admin_chat_threads') {
         try {
-            $pdo->exec("DELETE FROM complaints WHERE created_at IS NOT NULL AND created_at != '' AND created_at < DATETIME('now', '-30 days')");
-            $pdo->exec("DELETE FROM notifications WHERE created_at IS NOT NULL AND created_at != '' AND created_at < DATETIME('now', '-48 hours')");
-            $pdo->exec("DELETE FROM chat_messages WHERE created_at IS NOT NULL AND created_at != '' AND created_at < DATETIME('now', '-48 hours')");
+            $sub_30_days = db_now_sub_days(30);
+            $sub_48_hours = db_now_sub_hours(48);
+            $pdo->exec("DELETE FROM complaints WHERE created_at IS NOT NULL AND created_at != '' AND created_at < $sub_30_days");
+            $pdo->exec("DELETE FROM notifications WHERE created_at IS NOT NULL AND created_at != '' AND created_at < $sub_48_hours");
+            $pdo->exec("DELETE FROM chat_messages WHERE created_at IS NOT NULL AND created_at != '' AND created_at < $sub_48_hours");
         } catch (Exception $e) {}
 
         $admin_id = (int)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
@@ -1130,9 +1138,10 @@ try {
                     $pdo->prepare("DELETE FROM allocations WHERE user_id = ? AND status = 'pending'")->execute([$student_id]);
 
                     // 5. Create new active allocation
+                    $cur_date = db_current_date();
                     $stmt_ins = $pdo->prepare("
                         INSERT INTO allocations (user_id, seat_id, shift_id, start_date, status, notes)
-                        VALUES (?, ?, ?, DATE('now'), 'active', 'Seat reassigned by Admin')
+                        VALUES (?, ?, ?, $cur_date, 'active', 'Seat reassigned by Admin')
                     ");
                     $stmt_ins->execute([$student_id, $new_seat_id, $target_shift_id]);
 
@@ -1191,13 +1200,14 @@ try {
         $pdo->prepare("UPDATE users SET is_deleted = 1, deleted_at = ? WHERE id = ? AND role = 'student'")->execute([$now, $student_id]);
         $pdo->prepare("UPDATE allocations SET status = 'cancelled' WHERE user_id = ?")->execute([$student_id]);
 
-        echo json_encode(['success' => true, 'message' => "Student '$student_name' moved to Recycle Bin (Kept for 30 days)."]);
+        echo json_encode(['success' => true, 'message' => "Student '$student_name' moved to Recycle Bin (Kept for 60 days)."]);
         exit();
 
     } elseif ($action === 'get_recycle_bin_students') {
-        // Auto-purge items older than 30 days
+        // Auto-purge items older than 60 days
         try {
-            $old_ids = $pdo->query("SELECT id FROM users WHERE role = 'student' AND is_deleted = 1 AND deleted_at < DATETIME('now', '-30 days')")->fetchAll(PDO::FETCH_COLUMN);
+            $sub_60_days = db_now_sub_days(60);
+            $old_ids = $pdo->query("SELECT id FROM users WHERE role = 'student' AND is_deleted = 1 AND deleted_at < $sub_60_days")->fetchAll(PDO::FETCH_COLUMN);
             if (!empty($old_ids)) {
                 $in_clause = implode(',', array_fill(0, count($old_ids), '?'));
                 $pdo->prepare("DELETE FROM fee_payments WHERE user_id IN ($in_clause)")->execute($old_ids);
@@ -1209,10 +1219,11 @@ try {
             }
         } catch (Exception $e) {}
 
+        $days_left_expr = db_days_left_expression('u.deleted_at', $pdo);
         $stmt = $pdo->query("
             SELECT u.id, u.name, u.email, u.phone, u.father_name, u.address, u.emergency_contact, u.preparation_for,
                    u.id_proof_type, u.id_proof_no, u.status, u.deleted_at, u.registered_device_id, u.created_at,
-                   MAX(0, CAST(30 - (julianday('now') - julianday(u.deleted_at)) AS INTEGER)) as days_left
+                   $days_left_expr as days_left
             FROM users u
             WHERE u.role = 'student' AND u.is_deleted = 1
             ORDER BY u.deleted_at DESC
@@ -1384,16 +1395,13 @@ try {
 
         try {
             if ($app_name !== '') {
-                $stmt = $pdo->prepare("INSERT OR REPLACE INTO system_settings (setting_key, setting_value) VALUES ('app_name', ?)");
-                $stmt->execute([$app_name]);
+                db_upsert_system_setting($pdo, 'app_name', $app_name);
             }
             if ($app_logo_url !== '') {
-                $stmt = $pdo->prepare("INSERT OR REPLACE INTO system_settings (setting_key, setting_value) VALUES ('app_logo_url', ?)");
-                $stmt->execute([$app_logo_url]);
+                db_upsert_system_setting($pdo, 'app_logo_url', $app_logo_url);
             }
             if ($app_tagline !== '') {
-                $stmt = $pdo->prepare("INSERT OR REPLACE INTO system_settings (setting_key, setting_value) VALUES ('app_tagline', ?)");
-                $stmt->execute([$app_tagline]);
+                db_upsert_system_setting($pdo, 'app_tagline', $app_tagline);
             }
 
             echo json_encode([
@@ -1416,6 +1424,151 @@ try {
             'message' => $res ? "Database snapshot restored successfully with $total_students students!" : "Failed to restore snapshot.",
             'total_students' => (int)$total_students
         ]);
+        exit();
+
+    } elseif ($action === 'get_parents') {
+        $parents = $pdo->query("
+            SELECT id, name, email, phone, status, created_at
+            FROM users
+            WHERE role = 'parent' AND (is_deleted IS NULL OR is_deleted = 0)
+            ORDER BY id DESC
+        ")->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($parents as &$p) {
+            $p['linked_students'] = get_parent_linked_students($pdo, $p['id']);
+        }
+
+        $all_students = $pdo->query("
+            SELECT id, name, email, phone
+            FROM users
+            WHERE role = 'student' AND (is_deleted IS NULL OR is_deleted = 0)
+            ORDER BY name ASC
+        ")->fetchAll(PDO::FETCH_ASSOC);
+
+        echo json_encode([
+            'success' => true,
+            'parents' => $parents,
+            'all_students' => $all_students
+        ]);
+        exit();
+
+    } elseif ($action === 'create_parent') {
+        $name = trim($_POST['name'] ?? '');
+        $email = trim($_POST['email'] ?? '');
+        $phone = trim($_POST['phone'] ?? '');
+        $password = trim($_POST['password'] ?? '');
+        $student_ids = $_POST['student_ids'] ?? [];
+        if (is_string($student_ids)) {
+            $student_ids = json_decode($student_ids, true) ?: [$student_ids];
+        }
+
+        if (empty($name) || empty($email) || empty($password)) {
+            echo json_encode(['success' => false, 'message' => 'Parent Name, Email, and Password are required.']);
+            exit();
+        }
+
+        $stmt_check = $pdo->prepare("SELECT id FROM users WHERE email = ?");
+        $stmt_check->execute([$email]);
+        if ($stmt_check->fetch()) {
+            echo json_encode(['success' => false, 'message' => 'An account with this email already exists.']);
+            exit();
+        }
+
+        $hashed = password_hash($password, PASSWORD_DEFAULT);
+        $stmt_ins = $pdo->prepare("INSERT INTO users (name, email, phone, password, role, status) VALUES (?, ?, ?, ?, 'parent', 'approved')");
+        $stmt_ins->execute([$name, $email, $phone, $hashed]);
+        $parent_id = $pdo->lastInsertId();
+
+        if (!empty($student_ids) && is_array($student_ids)) {
+            $stmt_link = $pdo->prepare("INSERT INTO parent_student_links (parent_user_id, student_user_id, status) VALUES (?, ?, 'active')");
+            foreach ($student_ids as $sid) {
+                $sid = (int)$sid;
+                if ($sid > 0) {
+                    try { $stmt_link->execute([$parent_id, $sid]); } catch (Exception $e) {}
+                }
+            }
+        }
+
+        echo json_encode([
+            'success' => true,
+            'message' => 'Parent account created successfully and linked to students.',
+            'parent_id' => $parent_id
+        ]);
+        exit();
+
+    } elseif ($action === 'link_parent_student') {
+        $parent_id = (int)($_POST['parent_id'] ?? 0);
+        $student_id = (int)($_POST['student_id'] ?? 0);
+
+        if ($parent_id <= 0 || $student_id <= 0) {
+            echo json_encode(['success' => false, 'message' => 'Valid Parent ID and Student ID are required.']);
+            exit();
+        }
+
+        $stmt_link = $pdo->prepare("INSERT INTO parent_student_links (parent_user_id, student_user_id, status) VALUES (?, ?, 'active')");
+        try {
+            $stmt_link->execute([$parent_id, $student_id]);
+            echo json_encode(['success' => true, 'message' => 'Student linked to Parent successfully.']);
+        } catch (Exception $e) {
+            $pdo->prepare("UPDATE parent_student_links SET status = 'active' WHERE parent_user_id = ? AND student_user_id = ?")->execute([$parent_id, $student_id]);
+            echo json_encode(['success' => true, 'message' => 'Parent-student link updated to active.']);
+        }
+        exit();
+
+    } elseif ($action === 'unlink_parent_student') {
+        $parent_id = (int)($_POST['parent_id'] ?? 0);
+        $student_id = (int)($_POST['student_id'] ?? 0);
+
+        if ($parent_id <= 0 || $student_id <= 0) {
+            echo json_encode(['success' => false, 'message' => 'Valid Parent ID and Student ID are required.']);
+            exit();
+        }
+
+        $stmt_del = $pdo->prepare("DELETE FROM parent_student_links WHERE parent_user_id = ? AND student_user_id = ?");
+        $stmt_del->execute([$parent_id, $student_id]);
+
+        echo json_encode(['success' => true, 'message' => 'Student unlinked from Parent successfully.']);
+        exit();
+
+    } elseif ($action === 'toggle_parent_status') {
+        $parent_id = (int)($_POST['parent_id'] ?? 0);
+        if ($parent_id <= 0) {
+            echo json_encode(['success' => false, 'message' => 'Valid Parent ID required.']);
+            exit();
+        }
+
+        $stmt = $pdo->prepare("SELECT status FROM users WHERE id = ? AND role = 'parent'");
+        $stmt->execute([$parent_id]);
+        $curr_status = $stmt->fetchColumn();
+
+        if (!$curr_status) {
+            echo json_encode(['success' => false, 'message' => 'Parent user not found.']);
+            exit();
+        }
+
+        $new_status = ($curr_status === 'approved' || $curr_status === 'active') ? 'disabled' : 'approved';
+        $pdo->prepare("UPDATE users SET status = ? WHERE id = ?")->execute([$new_status, $parent_id]);
+
+        echo json_encode([
+            'success' => true,
+            'message' => "Parent account status updated to $new_status.",
+            'new_status' => $new_status
+        ]);
+        exit();
+
+    } elseif ($action === 'reset_parent_password') {
+        $parent_id = (int)($_POST['parent_id'] ?? 0);
+        $new_pass = trim($_POST['new_password'] ?? '');
+
+        if ($parent_id <= 0 || empty($new_pass)) {
+            echo json_encode(['success' => false, 'message' => 'Parent ID and New Password are required.']);
+            exit();
+        }
+
+        $hashed = password_hash($new_pass, PASSWORD_DEFAULT);
+        $pdo->prepare("UPDATE users SET password = ? WHERE id = ? AND role = 'parent'")->execute([$hashed, $parent_id]);
+
+        echo json_encode(['success' => true, 'message' => 'Parent password reset successfully.']);
         exit();
 
     } else {

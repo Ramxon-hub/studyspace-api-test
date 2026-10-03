@@ -7,6 +7,8 @@ require_once __DIR__ . '/includes/header.php';
 if (is_logged_in()) {
     if (is_admin()) {
         header("Location: admin_dashboard.php");
+    } elseif (is_parent()) {
+        header("Location: parent_dashboard.php");
     } else {
         header("Location: student_dashboard.php");
     }

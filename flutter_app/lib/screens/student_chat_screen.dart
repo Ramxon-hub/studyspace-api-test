@@ -20,7 +20,7 @@ class _StudentChatScreenState extends State<StudentChatScreen> {
   bool _isLoading = true;
   bool _isSending = false;
   List<dynamic> _messages = [];
-  int _adminId = 1;
+  // int _adminId = 1;
   Timer? _pollingTimer;
 
   @override
@@ -53,12 +53,10 @@ class _StudentChatScreenState extends State<StudentChatScreen> {
     if (mounted) {
       if (res['success'] == true) {
         final newMsgs = res['messages'] as List<dynamic>? ?? [];
-        final adminId = (res['admin_id'] as int?) ?? 1;
 
         if (newMsgs.length != _messages.length || !silent) {
           setState(() {
             _messages = newMsgs;
-            _adminId = adminId;
             _isLoading = false;
           });
           _scrollToBottom();

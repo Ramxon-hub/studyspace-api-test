@@ -550,7 +550,7 @@ if ($action === 'delete_row_seats') {
     exit();
 }
 
-// 20. MOVE STUDENT TO RECYCLE BIN (SOFT DELETE - KEPT FOR 30 DAYS)
+// 20. MOVE STUDENT TO RECYCLE BIN (SOFT DELETE - KEPT FOR 60 DAYS)
 if ($action === 'delete_student' || $action === 'soft_delete_student') {
     $user_id = (int)($_POST['user_id'] ?? 0);
     if ($user_id > 0) {
@@ -563,7 +563,7 @@ if ($action === 'delete_student' || $action === 'soft_delete_student') {
             $pdo->prepare("UPDATE users SET is_deleted = 1, deleted_at = ? WHERE id = ? AND role = 'student'")->execute([$now, $user_id]);
             $pdo->prepare("UPDATE allocations SET status = 'cancelled' WHERE user_id = ?")->execute([$user_id]);
 
-            header("Location: ../admin_dashboard.php?tab=students&msg=" . urlencode("Student '$name' moved to Recycle Bin! (Will be kept for 30 days)"));
+            header("Location: ../admin_dashboard.php?tab=students&msg=" . urlencode("Student '$name' moved to Recycle Bin! (Will be kept for 60 days)"));
         } else {
             header("Location: ../admin_dashboard.php?tab=students&error=" . urlencode("Student record not found."));
         }

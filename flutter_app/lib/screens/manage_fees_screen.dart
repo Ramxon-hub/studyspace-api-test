@@ -565,7 +565,7 @@ class _ManageFeesScreenState extends State<ManageFeesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // isDark unused
     final double totalCollected = (_stats?['total_collected'] as num?)?.toDouble() ?? 1900.0;
     final int pendingCount = _stats?['pending_count'] ?? 0;
     final int overdueCount = _stats?['overdue_count'] ?? 2;

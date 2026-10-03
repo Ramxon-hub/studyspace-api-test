@@ -25,6 +25,8 @@ if ($action === 'login') {
 
         if ($user['role'] === 'admin') {
             header("Location: ../admin_dashboard.php");
+        } elseif ($user['role'] === 'parent') {
+            header("Location: ../parent_dashboard.php");
         } else {
             header("Location: ../student_dashboard.php");
         }
