@@ -2,34 +2,17 @@ import 'package:flutter/material.dart';
 import 'tenant_config.dart';
 
 enum ApiEnvironment {
-  deplexoTest,
-  snapDeployTest,
-  productionInfinityFree,
-  cpanelStaging,
+  productionDeplexo,
 }
 
 class ApiConfig {
-  // Configurable API Environment (Default: Deplexo Test Host)
-  static ApiEnvironment activeEnvironment = ApiEnvironment.deplexoTest;
+  // Authoritative Production API Host on Deplexo
+  static ApiEnvironment activeEnvironment = ApiEnvironment.productionDeplexo;
 
-  static const String deplexoTestUrl = 'https://studyspace-api-test.de.deplexo.com';
-  static const String snapDeployTestUrl = 'https://studyspace-api-test-f4e0d.containers.snapdeploy.app';
-  static const String productionInfinityFreeUrl = 'https://studyspace.kesug.com';
-  static const String cpanelStagingUrl = 'https://studyspacetest.co4.in';
+  static const String productionUrl = 'https://studyspace-api-test.de.deplexo.com';
 
   // Centralized Base URL Switcher
-  static String get baseUrl {
-    switch (activeEnvironment) {
-      case ApiEnvironment.deplexoTest:
-        return deplexoTestUrl;
-      case ApiEnvironment.snapDeployTest:
-        return snapDeployTestUrl;
-      case ApiEnvironment.productionInfinityFree:
-        return productionInfinityFreeUrl;
-      case ApiEnvironment.cpanelStaging:
-        return cpanelStagingUrl;
-    }
-  }
+  static String get baseUrl => productionUrl;
 
   static String get jsonAuth => '$baseUrl/api/json_auth.php';
   static String get jsonStudent => '$baseUrl/api/json_student_actions.php';

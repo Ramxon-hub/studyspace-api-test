@@ -5,7 +5,7 @@ import 'package:flutter_app/config/api_config.dart';
 
 void main() {
   test('Deplexo API Connectivity Test', () async {
-    final String targetUrl = ApiConfig.deplexoTestUrl;
+    const String targetUrl = ApiConfig.productionUrl;
     print('Testing Deplexo API URL: $targetUrl');
 
     int httpStatus = 0;

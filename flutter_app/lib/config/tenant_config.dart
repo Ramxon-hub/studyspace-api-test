@@ -75,7 +75,7 @@ class TenantConfig {
     primaryColor: Color(0xFF1D4ED8),
     footerCredit: 'Ramxonwebwork',
     libraryIcon: Icons.menu_book_rounded,
-    apiBaseUrl: 'https://studyspacetest.co4.in',
+    apiBaseUrl: 'https://studyspace-api-test.de.deplexo.com',
   );
 
   static const TenantConfig libraryAbcConfig = TenantConfig(
