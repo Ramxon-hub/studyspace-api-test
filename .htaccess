@@ -1,0 +1,21 @@
+# Security Hardening & Directory Access Rules for StudySpace SaaS
+
+# Disable Directory Browsing
+Options -Indexes
+
+# Protect Sensitive Configuration, Database & Environment Files
+<FilesMatch "\.(env|sqlite|db|log|git|md|json|sh|py|ps1|bat|bak)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Restrict Access to Internal Directories
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(config|data|scripts|scratch|logs)/ - [F,L]
+</IfModule>

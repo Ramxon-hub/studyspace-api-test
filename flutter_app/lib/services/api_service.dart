@@ -10,6 +10,38 @@ class ApiService {
     'X-Library-Code': activeLibraryCode,
   };
 
+  static Map<String, dynamic> _safeDecodeResponse(http.Response response, {String defaultMessage = 'Server response error.'}) {
+    if (response.statusCode != 200) {
+      return {
+        'success': false,
+        'message': 'API service returned HTTP status ${response.statusCode}. Please verify server deployment.',
+        'error': 'API service returned HTTP status ${response.statusCode}. Please verify server deployment.'
+      };
+    }
+    final body = response.body.trim();
+    if (body.toLowerCase().startsWith('<html') ||
+        body.toLowerCase().startsWith('<!doctype') ||
+        body.contains('/aes.js') ||
+        body.contains('aes.js')) {
+      return {
+        'success': false,
+        'message': 'Server returned non-JSON HTML response. Please verify API endpoint configuration.',
+        'error': 'Server returned non-JSON HTML response. Please verify API endpoint configuration.'
+      };
+    }
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      return {'success': false, 'message': defaultMessage, 'error': defaultMessage};
+    } on FormatException {
+      return {'success': false, 'message': 'Invalid JSON response format from server.', 'error': 'Invalid JSON response format from server.'};
+    } catch (_) {
+      return {'success': false, 'message': defaultMessage, 'error': defaultMessage};
+    }
+  }
+
   // Fetch Public Tenant Branding & Information
   static Future<Map<String, dynamic>> getTenantInfo(String libraryCode) async {
     try {
@@ -18,7 +50,7 @@ class ApiService {
         Uri.parse('${ApiConfig.jsonTenant}?code=$code'),
         headers: {'X-Library-Code': code},
       ).timeout(_timeout);
-      return jsonDecode(response.body);
+      return _safeDecodeResponse(response, defaultMessage: 'Failed to retrieve tenant info.');
     } catch (e) {
       return {'success': false, 'error': 'Connection error or network timeout: $e'};
     }
@@ -32,7 +64,7 @@ class ApiService {
         headers: defaultHeaders,
         body: {'action': 'login', 'email': email, 'password': password, 'library_code': activeLibraryCode},
       ).timeout(_timeout);
-      return jsonDecode(response.body);
+      return _safeDecodeResponse(response);
     } catch (e) {
       return {'success': false, 'message': 'Network timeout or connection busy: $e'};
     }
@@ -49,7 +81,7 @@ class ApiService {
           'device_id': deviceId ?? '',
         },
       ).timeout(_timeout);
-      return jsonDecode(response.body);
+      return _safeDecodeResponse(response);
     } catch (e) {
       return {'success': false, 'message': 'Network timeout or connection busy: $e'};
     }
@@ -67,7 +99,7 @@ class ApiService {
           'device_id': deviceId ?? '',
         },
       ).timeout(_timeout);
-      return jsonDecode(response.body);
+      return _safeDecodeResponse(response);
     } catch (e) {
       return {'success': false, 'message': 'Network timeout or connection busy: $e'};
     }
@@ -101,7 +133,7 @@ class ApiService {
           'preparation_for': preparationFor ?? '',
         },
       );
-      return jsonDecode(response.body);
+      return _safeDecodeResponse(response);
     } catch (e) {
       return {'success': false, 'message': 'Connection error: $e'};
     }
@@ -113,8 +145,8 @@ class ApiService {
       final response = await http.get(
         Uri.parse('${ApiConfig.jsonAuth}?action=get_shifts'),
       );
-      final data = jsonDecode(response.body);
-      if (data['success'] == true) {
+      final data = _safeDecodeResponse(response);
+      if (data['success'] == true && data['shifts'] is List) {
         return data['shifts'];
       }
     } catch (e) {

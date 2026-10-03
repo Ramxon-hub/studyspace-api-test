@@ -6,8 +6,9 @@ ENV PORT=3000
 # Configure Apache to listen on port 3000 (Deplexo Container Requirement)
 RUN sed -i 's/80/3000/g' /etc/apache2/ports.conf /etc/apache2/sites-available/*.conf
 
-# Enable Apache rewrite module
+# Enable Apache rewrite module & AllowOverride
 RUN a2enmod rewrite
+RUN sed -i 's/AllowOverride None/AllowOverride All/g' /etc/apache2/apache2.conf /etc/apache2/sites-available/*.conf
 
 # Install required system dependencies & PHP extensions
 RUN apt-get update && apt-get install -y \
