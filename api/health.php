@@ -17,6 +17,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
 http_response_code(200);
 
 require_once __DIR__ . '/../config/env.php';
+require_once __DIR__ . '/../config/master_db.php';
 
 $app_env = defined('APP_ENV') ? APP_ENV : (getenv('APP_ENV') ?: 'production');
 $db_connected = false;
