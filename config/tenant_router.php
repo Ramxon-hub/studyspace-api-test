@@ -91,12 +91,17 @@ class TenantDatabaseFactory {
             if (!file_exists($dir)) {
                 @mkdir($dir, 0777, true);
             }
+            @chmod($dir, 0777);
+            if (file_exists($db_file)) {
+                @chmod($db_file, 0777);
+            }
             $tenant_pdo = new PDO("sqlite:" . $db_file);
             $tenant_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             $tenant_pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-            $tenant_pdo->exec("PRAGMA foreign_keys = ON;");
-            $tenant_pdo->exec("PRAGMA journal_mode = WAL;");
-            $tenant_pdo->exec("PRAGMA synchronous = NORMAL;");
+            try { $tenant_pdo->exec("PRAGMA foreign_keys = ON;"); } catch (Exception $e) {}
+            try { $tenant_pdo->exec("PRAGMA journal_mode = WAL;"); } catch (Exception $e) {}
+            try { $tenant_pdo->exec("PRAGMA busy_timeout = 10000;"); } catch (Exception $e) {}
+            try { $tenant_pdo->exec("PRAGMA synchronous = NORMAL;"); } catch (Exception $e) {}
         }
 
         // Initialize tenant schema (all 12 tables + migrations)
@@ -119,51 +124,34 @@ class TenantDatabaseFactory {
         $library_code = strtoupper(trim((string)$library_code));
         $lc_code = strtolower($library_code);
         
-        // 1. Prioritize Deplexo / Production Persistent Disk Mount (/data/...)
-        $deplexo_primary = '/data/tenant_' . $lc_code . '.sqlite';
-        if (file_exists($deplexo_primary)) {
-            return $deplexo_primary;
-        }
-
-        if (!empty($configured_file)) {
-            $deplexo_configured = '/data/' . basename($configured_file);
-            if (file_exists($deplexo_configured)) {
-                return $deplexo_configured;
-            }
-        }
-
-        if (defined('APP_ENV') && APP_ENV === 'deplexo_test' && file_exists('/data/studyspace_test.sqlite')) {
-            return '/data/studyspace_test.sqlite';
-        }
-
-        // 2. Direct match if configured path is ALREADY an absolute path on host
-        if (!empty($configured_file) && (strpos($configured_file, '/') === 0 || strpos($configured_file, ':\\') !== false || preg_match('/^[a-zA-Z]:\\\\/', $configured_file))) {
-            if (file_exists($configured_file)) {
-                return $configured_file;
-            }
-        }
-
-        // 3. Resolve relative to canonical App Data Directory using absolute path
         $data_dir = realpath(__DIR__ . '/../data') ?: (__DIR__ . '/../data');
-        if (!empty($configured_file)) {
-            $filename = basename($configured_file);
-            $candidate = $data_dir . '/' . $filename;
-            if (file_exists($candidate)) {
+        $filename = !empty($configured_file) ? basename($configured_file) : ('tenant_' . $lc_code . '.sqlite');
+
+        $candidates = [
+            '/data/' . $filename,
+            '/data/tenant_' . $lc_code . '.sqlite',
+            '/var/www/html/data/' . $filename,
+            '/var/www/html/data/tenant_' . $lc_code . '.sqlite',
+            $data_dir . '/' . $filename,
+            $data_dir . '/tenant_' . $lc_code . '.sqlite'
+        ];
+
+        if (!empty($configured_file) && file_exists($configured_file)) {
+            array_unshift($candidates, $configured_file);
+        }
+
+        foreach ($candidates as $candidate) {
+            if (!empty($candidate) && file_exists($candidate)) {
                 return $candidate;
             }
         }
 
-        $default_candidate = $data_dir . '/tenant_' . $lc_code . '.sqlite';
-        if (file_exists($default_candidate)) {
-            return $default_candidate;
-        }
-
-        // 4. Fallback default paths if creating new file
+        // Fallback: if persistent /data directory exists, use /data/tenant_{code}.sqlite
         if (is_dir('/data')) {
-            return $deplexo_primary;
+            return '/data/tenant_' . $lc_code . '.sqlite';
         }
 
-        return $default_candidate;
+        return $data_dir . '/tenant_' . $lc_code . '.sqlite';
     }
 
     public static function clearCache() {
