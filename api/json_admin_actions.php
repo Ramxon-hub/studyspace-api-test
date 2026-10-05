@@ -102,6 +102,33 @@ try {
         try {
             $pdo->beginTransaction();
 
+            // Verify student exists
+            $stmt_u_chk = $pdo->prepare("SELECT id FROM users WHERE id = ?");
+            $stmt_u_chk->execute([$student_id]);
+            if (!$stmt_u_chk->fetch()) {
+                $pdo->rollBack();
+                echo json_encode(['success' => false, 'message' => "Student (ID: $student_id) does not exist in the database."]);
+                exit();
+            }
+
+            // Verify seat desk exists
+            $stmt_s_chk = $pdo->prepare("SELECT id FROM seats WHERE id = ?");
+            $stmt_s_chk->execute([$seat_id]);
+            if (!$stmt_s_chk->fetch()) {
+                $pdo->rollBack();
+                echo json_encode(['success' => false, 'message' => "Seat Desk (ID: $seat_id) does not exist in the database."]);
+                exit();
+            }
+
+            // Verify shift exists
+            $stmt_sh_chk = $pdo->prepare("SELECT id FROM shifts WHERE id = ?");
+            $stmt_sh_chk->execute([$shift_id]);
+            if (!$stmt_sh_chk->fetch()) {
+                $pdo->rollBack();
+                echo json_encode(['success' => false, 'message' => "Shift (ID: $shift_id) does not exist in the database."]);
+                exit();
+            }
+
             // Check if seat desk is already occupied in this shift by another student
             $stmt_check = $pdo->prepare("
                 SELECT a.id, u.name as student_name, s.seat_number, sh.name as shift_name

@@ -65,7 +65,8 @@ if ($action === 'register') {
     $hashed_pass = password_hash($password, PASSWORD_DEFAULT);
     $stmt = $pdo->prepare("INSERT INTO users (name, email, phone, password, role, emergency_contact, id_proof_type, id_proof_no, status) VALUES (?, ?, ?, ?, 'student', ?, ?, ?, 'pending')");
     $stmt->execute([$name, $email, $phone, $hashed_pass, $emergency_contact, $id_proof_type, $id_proof_no]);
-    $user_id = $pdo->lastInsertId();
+    $user_id = (int)$pdo->lastInsertId();
+    $pdo->exec("UPDATE users SET id = rowid WHERE id IS NULL OR id = 0");
 
     // If preferred seat is selected, create a pending allocation request
     if ($preferred_seat_id > 0) {

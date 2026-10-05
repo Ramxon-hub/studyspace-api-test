@@ -23,6 +23,30 @@ if ($action === 'approve_student') {
         exit();
     }
 
+    // Verify user exists
+    $stmt_u_chk = $pdo->prepare("SELECT id FROM users WHERE id = ?");
+    $stmt_u_chk->execute([$user_id]);
+    if (!$stmt_u_chk->fetch()) {
+        header("Location: ../admin_dashboard.php?tab=students&error=" . urlencode("Student (ID: $user_id) does not exist in system."));
+        exit();
+    }
+
+    // Verify seat exists
+    $stmt_s_chk = $pdo->prepare("SELECT id FROM seats WHERE id = ?");
+    $stmt_s_chk->execute([$seat_id]);
+    if (!$stmt_s_chk->fetch()) {
+        header("Location: ../admin_dashboard.php?tab=students&error=" . urlencode("Seat Desk (ID: $seat_id) does not exist in system."));
+        exit();
+    }
+
+    // Verify shift exists
+    $stmt_sh_chk = $pdo->prepare("SELECT id FROM shifts WHERE id = ?");
+    $stmt_sh_chk->execute([$shift_id]);
+    if (!$stmt_sh_chk->fetch()) {
+        header("Location: ../admin_dashboard.php?tab=students&error=" . urlencode("Shift (ID: $shift_id) does not exist in system."));
+        exit();
+    }
+
     $check_stmt = $pdo->prepare("
         SELECT a.id, u.name as student_name, s.seat_number, sh.name as shift_name
         FROM allocations a

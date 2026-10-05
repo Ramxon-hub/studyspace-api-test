@@ -135,7 +135,8 @@ try {
             VALUES (?, ?, ?, ?, 'student', ?, ?, ?, ?, 'pending')
         ");
         $stmt_insert->execute([$name, $email, $phone, $hashed, $emergency_contact, $id_proof_type, $id_proof_no, $preparation_for]);
-        $user_id = $pdo->lastInsertId();
+        $user_id = (int)$pdo->lastInsertId();
+        $pdo->exec("UPDATE users SET id = rowid WHERE id IS NULL OR id = 0");
 
         // Create initial pending allocation request
         $stmt_dummy_seat = $pdo->query("SELECT id FROM seats LIMIT 1");

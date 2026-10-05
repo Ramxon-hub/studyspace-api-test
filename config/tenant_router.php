@@ -100,42 +100,21 @@ class TenantDatabaseFactory {
             // Default: SQLite Database Per Tenant
             $db_file = self::resolveTenantDbPath($library_code, $cfg['db_file'] ?? null);
             $dir = dirname($db_file);
-
-            $target_file = $db_file;
-            if (file_exists($db_file) && !is_writable($db_file)) {
-                $writable_fallback = sys_get_temp_dir() . '/' . basename($db_file);
-                if (!file_exists($writable_fallback) || filemtime($db_file) > filemtime($writable_fallback)) {
-                    @copy($db_file, $writable_fallback);
-                }
-                @chmod($writable_fallback, 0777);
-                $target_file = $writable_fallback;
+            if (!file_exists($dir)) {
+                @mkdir($dir, 0777, true);
+            }
+            @chmod($dir, 0777);
+            if (file_exists($db_file)) {
+                @chmod($db_file, 0777);
             }
 
-            try {
-                $tenant_pdo = new PDO("sqlite:" . $target_file);
-                $tenant_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-                $tenant_pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-                try { $tenant_pdo->exec("PRAGMA foreign_keys = ON;"); } catch (Exception $e) {}
-                try { $tenant_pdo->exec("PRAGMA journal_mode = DELETE;"); } catch (Exception $e) {}
-                try { $tenant_pdo->exec("PRAGMA busy_timeout = 10000;"); } catch (Exception $e) {}
-                try { $tenant_pdo->exec("PRAGMA synchronous = NORMAL;"); } catch (Exception $e) {}
-            } catch (Exception $pdo_err) {
-                // If opening target file failed for any OS permission reason, copy to temp directory and open
-                $fallback_file = sys_get_temp_dir() . '/' . basename($db_file);
-                if (file_exists($db_file) && is_readable($db_file)) {
-                    @copy($db_file, $fallback_file);
-                    @chmod($fallback_file, 0777);
-                    $tenant_pdo = new PDO("sqlite:" . $fallback_file);
-                    $tenant_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-                    $tenant_pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-                    try { $tenant_pdo->exec("PRAGMA foreign_keys = ON;"); } catch (Exception $e) {}
-                    try { $tenant_pdo->exec("PRAGMA journal_mode = DELETE;"); } catch (Exception $e) {}
-                    try { $tenant_pdo->exec("PRAGMA busy_timeout = 10000;"); } catch (Exception $e) {}
-                    try { $tenant_pdo->exec("PRAGMA synchronous = NORMAL;"); } catch (Exception $e) {}
-                } else {
-                    throw $pdo_err;
-                }
-            }
+            $tenant_pdo = new PDO("sqlite:" . $db_file);
+            $tenant_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $tenant_pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+            try { $tenant_pdo->exec("PRAGMA foreign_keys = ON;"); } catch (Exception $e) {}
+            try { $tenant_pdo->exec("PRAGMA journal_mode = DELETE;"); } catch (Exception $e) {}
+            try { $tenant_pdo->exec("PRAGMA busy_timeout = 10000;"); } catch (Exception $e) {}
+            try { $tenant_pdo->exec("PRAGMA synchronous = NORMAL;"); } catch (Exception $e) {}
         }
 
         // Initialize tenant schema (all 12 tables + migrations)
@@ -167,9 +146,7 @@ class TenantDatabaseFactory {
             '/var/www/html/data/' . $filename,
             '/var/www/html/data/tenant_' . $lc_code . '.sqlite',
             $data_dir . '/' . $filename,
-            $data_dir . '/tenant_' . $lc_code . '.sqlite',
-            sys_get_temp_dir() . '/tenant_' . $lc_code . '.sqlite',
-            '/tmp/tenant_' . $lc_code . '.sqlite'
+            $data_dir . '/tenant_' . $lc_code . '.sqlite'
         ];
 
         if (!empty($configured_file) && file_exists($configured_file)) {
@@ -187,9 +164,9 @@ class TenantDatabaseFactory {
         // 2. If database file does not exist, select the first directory writable by process user
         $write_targets = [
             '/data/tenant_' . $lc_code . '.sqlite',
+            '/data/' . $filename,
             $data_dir . '/tenant_' . $lc_code . '.sqlite',
-            sys_get_temp_dir() . '/tenant_' . $lc_code . '.sqlite',
-            '/tmp/tenant_' . $lc_code . '.sqlite'
+            $data_dir . '/' . $filename
         ];
 
         foreach ($write_targets as $target) {
@@ -203,7 +180,7 @@ class TenantDatabaseFactory {
             }
         }
 
-        return sys_get_temp_dir() . '/tenant_' . $lc_code . '.sqlite';
+        return $data_dir . '/tenant_' . $lc_code . '.sqlite';
     }
 
     public static function clearCache() {

@@ -693,6 +693,19 @@ function run_migrations($pdo) {
                         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_parent_student_student ON parent_student_links(student_user_id)");
                     } catch (Exception $e) {}
                 }
+            ],
+            8 => [
+                'name' => 'sync_user_seat_shift_ids_with_rowids',
+                'sql' => function($pdo) {
+                    try {
+                        $driver = strtolower((string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME));
+                        if ($driver === 'sqlite') {
+                            $pdo->exec("UPDATE users SET id = rowid WHERE id IS NULL OR id = 0");
+                            $pdo->exec("UPDATE seats SET id = rowid WHERE id IS NULL OR id = 0");
+                            $pdo->exec("UPDATE shifts SET id = rowid WHERE id IS NULL OR id = 0");
+                        }
+                    } catch (Exception $e) {}
+                }
             ]
         ];
 
