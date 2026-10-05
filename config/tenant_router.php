@@ -137,14 +137,16 @@ class TenantDatabaseFactory {
             '/var/www/html/data/' . $filename,
             '/var/www/html/data/tenant_' . $lc_code . '.sqlite',
             $data_dir . '/' . $filename,
-            $data_dir . '/tenant_' . $lc_code . '.sqlite'
+            $data_dir . '/tenant_' . $lc_code . '.sqlite',
+            sys_get_temp_dir() . '/tenant_' . $lc_code . '.sqlite',
+            '/tmp/tenant_' . $lc_code . '.sqlite'
         ];
 
         if (!empty($configured_file) && file_exists($configured_file)) {
             array_unshift($candidates, $configured_file);
         }
 
-        // 1. Check existing files first across all known paths
+        // 1. Check existing database files first across all candidate locations
         foreach ($candidates as $candidate) {
             if (!empty($candidate) && file_exists($candidate)) {
                 @chmod($candidate, 0777);
@@ -152,18 +154,26 @@ class TenantDatabaseFactory {
             }
         }
 
-        // 2. If file does not exist, pick a directory where www-data CAN create new files
-        if (!file_exists($data_dir)) {
-            @mkdir($data_dir, 0777, true);
-        }
-        @chmod($data_dir, 0777);
+        // 2. If database file does not exist, select the first directory writable by process user
+        $write_targets = [
+            '/data/tenant_' . $lc_code . '.sqlite',
+            $data_dir . '/tenant_' . $lc_code . '.sqlite',
+            sys_get_temp_dir() . '/tenant_' . $lc_code . '.sqlite',
+            '/tmp/tenant_' . $lc_code . '.sqlite'
+        ];
 
-        @chmod('/data', 0777);
-        if (is_dir('/data') && is_writable('/data')) {
-            return '/data/tenant_' . $lc_code . '.sqlite';
+        foreach ($write_targets as $target) {
+            $dir = dirname($target);
+            if (!file_exists($dir)) {
+                @mkdir($dir, 0777, true);
+            }
+            @chmod($dir, 0777);
+            if (is_dir($dir) && is_writable($dir)) {
+                return $target;
+            }
         }
 
-        return $data_dir . '/tenant_' . $lc_code . '.sqlite';
+        return sys_get_temp_dir() . '/tenant_' . $lc_code . '.sqlite';
     }
 
     public static function clearCache() {
