@@ -869,6 +869,79 @@ class ApiService {
     }
   }
 
+  // Get Parent Chat Messages for Linked Student
+  static Future<Map<String, dynamic>> getParentChatMessages(int studentId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonParent}?action=get_chat_messages&student_id=$studentId'),
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to load chat messages: $e'};
+    }
+  }
+
+  // Send Parent Chat Message to Admin
+  static Future<Map<String, dynamic>> sendParentChatMessage(int studentId, String message) async {
+    try {
+      final response = await http.post(
+        Uri.parse(ApiConfig.jsonParent),
+        body: {
+          'action': 'send_chat_message',
+          'student_id': studentId.toString(),
+          'message': message,
+        },
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to send chat message: $e'};
+    }
+  }
+
+  // Get Parent Unread Badges Count
+  static Future<Map<String, dynamic>> getParentUnreadCounts({int? studentId}) async {
+    try {
+      final sidParam = studentId != null && studentId > 0 ? '&student_id=$studentId' : '';
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonParent}?action=get_unread_counts$sidParam'),
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to get unread counts: $e'};
+    }
+  }
+
+  // Get Complaints for Linked Student
+  static Future<Map<String, dynamic>> getParentComplaints(int studentId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonParent}?action=complaints&student_id=$studentId'),
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to load complaints: $e'};
+    }
+  }
+
+  // Create Complaint / Request for Linked Student
+  static Future<Map<String, dynamic>> createParentComplaint(int studentId, {String? subject, required String message}) async {
+    try {
+      final response = await http.post(
+        Uri.parse(ApiConfig.jsonParent),
+        body: {
+          'action': 'create_complaint',
+          'student_id': studentId.toString(),
+          'subject': subject ?? 'Parent Query / Request',
+          'description': message,
+        },
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to submit complaint: $e'};
+    }
+  }
+
+
   // ==========================================
   // SUPER ADMIN PLATFORM API SERVICES
   // ==========================================

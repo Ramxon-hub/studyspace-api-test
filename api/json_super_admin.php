@@ -224,6 +224,19 @@ try {
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
+        try {
+            $tenant_pdo = TenantDatabaseFactory::getTenantConnection($code);
+            $lib['metrics'] = [
+                'total_students' => (int)$tenant_pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student' AND (is_deleted IS NULL OR is_deleted = 0)")->fetchColumn(),
+                'total_parents' => (int)$tenant_pdo->query("SELECT COUNT(*) FROM users WHERE role = 'parent' AND (is_deleted IS NULL OR is_deleted = 0)")->fetchColumn(),
+                'linked_parents' => (int)$tenant_pdo->query("SELECT COUNT(DISTINCT parent_user_id) FROM parent_student_links WHERE status = 'active'")->fetchColumn(),
+                'active_allocations' => (int)$tenant_pdo->query("SELECT COUNT(*) FROM allocations WHERE status = 'active'")->fetchColumn(),
+                'total_seats' => (int)$tenant_pdo->query("SELECT COUNT(*) FROM seats WHERE is_active = 1")->fetchColumn(),
+            ];
+        } catch (Exception $e) {
+            $lib['metrics'] = null;
+        }
+
         echo json_encode(['success' => true, 'library' => $lib]);
         if (defined('IN_TEST_SUITE')) return; else exit();
 

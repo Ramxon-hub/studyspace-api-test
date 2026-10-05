@@ -14,15 +14,11 @@ class SuperAdminDashboardScreen extends StatefulWidget {
 class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   bool _isLoading = true;
-  String? _errorMessage;
-
   // Stats Data
   Map<String, dynamic> _stats = {};
   List<dynamic> _libraries = [];
   List<dynamic> _plans = [];
-  List<dynamic> _invoices = [];
   List<dynamic> _payments = [];
-  List<dynamic> _renewalRequests = [];
   List<dynamic> _auditLogs = [];
   Map<String, dynamic> _supportSettings = {};
 
@@ -42,16 +38,13 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen> w
   Future<void> _loadAllData() async {
     setState(() {
       _isLoading = true;
-      _errorMessage = null;
     });
 
     try {
       final statsRes = await ApiService.superAdminCall('dashboard_stats');
       final libsRes = await ApiService.superAdminCall('list_libraries');
       final plansRes = await ApiService.superAdminCall('list_plans');
-      final invRes = await ApiService.superAdminCall('list_invoices');
       final payRes = await ApiService.superAdminCall('list_manual_payments');
-      final renewRes = await ApiService.superAdminCall('list_renewal_requests');
       final auditRes = await ApiService.superAdminCall('list_audit_logs');
       final suppRes = await ApiService.superAdminCall('get_support_settings');
 
@@ -61,9 +54,7 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen> w
           if (statsRes['success'] == true) _stats = statsRes['stats'] ?? {};
           if (libsRes['success'] == true) _libraries = libsRes['libraries'] ?? [];
           if (plansRes['success'] == true) _plans = plansRes['plans'] ?? [];
-          if (invRes['success'] == true) _invoices = invRes['invoices'] ?? [];
           if (payRes['success'] == true) _payments = payRes['payments'] ?? [];
-          if (renewRes['success'] == true) _renewalRequests = renewRes['requests'] ?? [];
           if (auditRes['success'] == true) _auditLogs = auditRes['logs'] ?? [];
           if (suppRes['success'] == true) _supportSettings = suppRes['settings'] ?? {};
         });
@@ -72,7 +63,6 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen> w
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _errorMessage = "Failed to load dashboard data: $e";
         });
       }
     }

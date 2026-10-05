@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../config/api_config.dart';
 import '../services/api_service.dart';
+import 'parent_chat_screen.dart';
 
 class ParentDashboardScreen extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -18,6 +19,8 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
   List<dynamic> _linkedStudents = [];
   Map<String, dynamic>? _selectedStudent;
   Map<String, dynamic>? _studentSummary;
+  int _unreadChatCount = 0;
+  List<dynamic> _complaints = [];
 
   @override
   void initState() {
@@ -62,9 +65,14 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
     });
 
     final summaryRes = await ApiService.getParentStudentFullSummary(studentId);
+    final unreadRes = await ApiService.getParentUnreadCounts(studentId: studentId);
+    final compRes = await ApiService.getParentComplaints(studentId);
+
     if (summaryRes['success'] == true) {
       setState(() {
         _studentSummary = summaryRes;
+        _unreadChatCount = unreadRes['unread_chat_count'] ?? 0;
+        _complaints = compRes['complaints'] as List<dynamic>? ?? [];
         _isLoading = false;
       });
     } else {
@@ -82,6 +90,72 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
     _loadStudentSummary(student['id']);
   }
 
+  void _openParentChat() {
+    if (_selectedStudent == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ParentChatScreen(
+          studentId: _selectedStudent!['id'],
+          studentName: _selectedStudent!['name'] ?? 'Child',
+        ),
+      ),
+    ).then((_) {
+      if (_selectedStudent != null) {
+        _loadStudentSummary(_selectedStudent!['id']);
+      }
+    });
+  }
+
+  void _showFileComplaintDialog() {
+    final subjectCtrl = TextEditingController(text: 'Parent Query / Request');
+    final msgCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('File Support Request / Query 🛡️'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: subjectCtrl,
+              decoration: const InputDecoration(labelText: 'Subject', hintText: 'e.g. Shift Change / Fee Query'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: msgCtrl,
+              maxLines: 3,
+              decoration: const InputDecoration(labelText: 'Request Details', hintText: 'Enter details for Library Admin'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryIndigo),
+            onPressed: () async {
+              final msg = msgCtrl.text.trim();
+              if (msg.isEmpty || _selectedStudent == null) return;
+              Navigator.pop(ctx);
+              final res = await ApiService.createParentComplaint(
+                _selectedStudent!['id'],
+                subject: subjectCtrl.text.trim(),
+                message: msg,
+              );
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(res['message'] ?? 'Submitted.')),
+                );
+                _loadStudentSummary(_selectedStudent!['id']);
+              }
+            },
+            child: const Text('Submit', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -94,6 +168,33 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
         foregroundColor: Colors.white,
         elevation: 2,
         actions: [
+          Stack(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chat),
+                tooltip: 'Admin Chat Desk',
+                onPressed: _openParentChat,
+              ),
+              if (_unreadChatCount > 0)
+                Positioned(
+                  right: 6,
+                  top: 6,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                    child: Text(
+                      '$_unreadChatCount',
+                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh Data',
@@ -219,6 +320,14 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
 
                             // 12-Month Matrix List Tile
                             _build12MonthMatrixTile(isDark),
+                            const SizedBox(height: 16),
+
+                             // Chat & Support Banner Card
+                            _buildChatSupportCard(isDark),
+                            const SizedBox(height: 16),
+
+                            // Complaints & Support Requests Card
+                            _buildComplaintsCard(isDark),
                             const SizedBox(height: 16),
 
                             // Notifications List
@@ -533,6 +642,108 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
                     trailing: Text(
                       n['created_at'] != null ? n['created_at'].toString().split(' ')[0] : '',
                       style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    ),
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChatSupportCard(bool isDark) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: isDark ? AppColors.darkCard : Colors.white,
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: CircleAvatar(
+          backgroundColor: AppColors.primaryIndigo.withOpacity(0.15),
+          child: const Icon(Icons.mark_chat_unread, color: AppColors.primaryIndigo),
+        ),
+        title: const Text('Direct Admin Chat Desk 💬', style: TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: const Text('Chat 1-on-1 with Library Owner for seat, fee & shift queries.'),
+        trailing: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primaryIndigo,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          ),
+          onPressed: _openParentChat,
+          child: const Text('Open Chat'),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildComplaintsCard(bool isDark) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: isDark ? AppColors.darkCard : Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.report_problem, color: Colors.orange),
+                    SizedBox(width: 8),
+                    Text("Support Requests & Queries", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  ],
+                ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber[800],
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('New Request', style: TextStyle(fontSize: 12)),
+                  onPressed: _showFileComplaintDialog,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (_complaints.isEmpty)
+              const Text('No complaints or requests filed.', style: TextStyle(color: Colors.grey))
+            else
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _complaints.length,
+                separatorBuilder: (context, index) => const Divider(height: 12),
+                itemBuilder: (context, index) {
+                  final c = _complaints[index];
+                  final status = c['status'] ?? 'open';
+                  final isResolved = status == 'resolved' || status == 'closed';
+
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: Text(c['subject'] ?? 'Query', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text(c['description'] ?? ''),
+                    trailing: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: isResolved ? AppColors.statusSuccessBg : AppColors.statusWarningBg,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        status.toUpperCase(),
+                        style: TextStyle(
+                          color: isResolved ? AppColors.statusSuccess : AppColors.statusWarning,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                        ),
+                      ),
                     ),
                   );
                 },

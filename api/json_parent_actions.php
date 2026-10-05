@@ -438,6 +438,173 @@ try {
         ]);
         exit();
 
+    } elseif ($action === 'get_chat_messages') {
+        $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
+        if ($student_id <= 0) {
+            $linked = get_parent_linked_students($pdo, $parent_id);
+            if (!empty($linked)) {
+                $student_id = (int)$linked[0]['id'];
+            }
+        }
+
+        if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
+            exit();
+        }
+
+        $admin_id = (int)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
+        if ($admin_id <= 0) $admin_id = 1;
+
+        // Mark incoming messages as read for this parent and student
+        $pdo->exec("UPDATE chat_messages SET is_read = 1 WHERE (receiver_id = $parent_id OR receiver_id = $student_id) AND (is_read = 0 OR is_read IS NULL)");
+
+        $stmt = $pdo->prepare("
+            SELECT cm.*, u_send.name as sender_name, u_send.role as sender_role
+            FROM chat_messages cm
+            JOIN users u_send ON cm.sender_id = u_send.id
+            WHERE (cm.sender_id IN (?, ?) AND cm.receiver_id = ?) 
+               OR (cm.sender_id = ? AND cm.receiver_id IN (?, ?))
+            ORDER BY cm.id ASC
+        ");
+        $stmt->execute([$parent_id, $student_id, $admin_id, $admin_id, $parent_id, $student_id]);
+        $messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        echo json_encode([
+            'success' => true,
+            'messages' => $messages,
+            'parent_id' => $parent_id,
+            'student_id' => $student_id
+        ]);
+        exit();
+
+    } elseif ($action === 'send_chat_message') {
+        $student_id = (int)($_POST['student_id'] ?? ($_GET['student_id'] ?? 0));
+        $msg_text = trim($_POST['message'] ?? ($_GET['message'] ?? ''));
+
+        if ($student_id <= 0) {
+            $linked = get_parent_linked_students($pdo, $parent_id);
+            if (!empty($linked)) {
+                $student_id = (int)$linked[0]['id'];
+            }
+        }
+
+        if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
+            exit();
+        }
+
+        if (empty($msg_text)) {
+            echo json_encode(['success' => false, 'message' => 'Message content cannot be empty.']);
+            exit();
+        }
+
+        $admin_id = (int)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
+        if ($admin_id <= 0) $admin_id = 1;
+
+        $stmt = $pdo->prepare("INSERT INTO chat_messages (sender_id, receiver_id, message, is_read) VALUES (?, ?, ?, 0)");
+        $stmt->execute([$parent_id, $admin_id, $msg_text]);
+        $msg_id = $pdo->lastInsertId();
+
+        // Also notify admin
+        $pdo->prepare("
+            INSERT INTO notifications (title, message, user_id)
+            VALUES ('New Message from Parent 🛡️', ?, ?)
+        ")->execute([$msg_text, $admin_id]);
+
+        echo json_encode(['success' => true, 'message_id' => $msg_id]);
+        exit();
+
+    } elseif ($action === 'get_unread_counts') {
+        $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
+        if ($student_id <= 0) {
+            $linked = get_parent_linked_students($pdo, $parent_id);
+            if (!empty($linked)) {
+                $student_id = (int)$linked[0]['id'];
+            }
+        }
+
+        $admin_id = (int)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
+        if ($admin_id <= 0) $admin_id = 1;
+
+        $unread_chat = (int)$pdo->query("
+            SELECT COUNT(*) FROM chat_messages 
+            WHERE (receiver_id = $parent_id OR (receiver_id = $student_id AND $student_id > 0)) 
+              AND (is_read = 0 OR is_read IS NULL)
+        ")->fetchColumn();
+
+        $unread_notif = (int)$pdo->query("
+            SELECT COUNT(*) FROM notifications 
+            WHERE (user_id = $parent_id OR (user_id = $student_id AND $student_id > 0) OR user_id = 0) 
+              AND (is_read = 0 OR is_read IS NULL)
+        ")->fetchColumn();
+
+        echo json_encode([
+            'success' => true,
+            'unread_chat_count' => $unread_chat,
+            'unread_notification_count' => $unread_notif
+        ]);
+        exit();
+
+    } elseif ($action === 'complaints') {
+        $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
+        if ($student_id <= 0) {
+            $linked = get_parent_linked_students($pdo, $parent_id);
+            if (!empty($linked)) {
+                $student_id = (int)$linked[0]['id'];
+            }
+        }
+
+        if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
+            exit();
+        }
+
+        $stmt = $pdo->prepare("SELECT * FROM complaints WHERE user_id = ? ORDER BY id DESC");
+        $stmt->execute([$student_id]);
+        $complaints = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        echo json_encode([
+            'success' => true,
+            'complaints' => $complaints
+        ]);
+        exit();
+
+    } elseif ($action === 'create_complaint') {
+        $student_id = (int)($_POST['student_id'] ?? ($_GET['student_id'] ?? 0));
+        $subject = trim($_POST['subject'] ?? 'Parent Query / Request');
+        $desc = trim($_POST['description'] ?? ($_POST['message'] ?? ''));
+        $category = trim($_POST['category'] ?? 'General');
+
+        if ($student_id <= 0) {
+            $linked = get_parent_linked_students($pdo, $parent_id);
+            if (!empty($linked)) {
+                $student_id = (int)$linked[0]['id'];
+            }
+        }
+
+        if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
+            exit();
+        }
+
+        if (empty($desc)) {
+            echo json_encode(['success' => false, 'message' => 'Complaint description cannot be empty.']);
+            exit();
+        }
+
+        $stmt = $pdo->prepare("INSERT INTO complaints (user_id, subject, description, category, status) VALUES (?, ?, ?, ?, 'open')");
+        $stmt->execute([$student_id, $subject, $desc, $category]);
+
+        echo json_encode([
+            'success' => true,
+            'message' => 'Complaint / request submitted successfully to Library Admin.'
+        ]);
+        exit();
+
     } else {
         echo json_encode(['success' => false, 'message' => 'Invalid action specified.']);
         exit();
