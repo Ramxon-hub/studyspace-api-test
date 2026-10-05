@@ -3,6 +3,18 @@
 
 require_once __DIR__ . '/master_db.php';
 
+function is_dir_writable_safe($dir) {
+    if (empty($dir) || !is_dir($dir)) return false;
+    $test_file = rtrim($dir, '/\\') . '/.wtest_' . uniqid();
+    $fp = @fopen($test_file, 'w');
+    if ($fp !== false) {
+        @fclose($fp);
+        @unlink($test_file);
+        return true;
+    }
+    return false;
+}
+
 class TenantDatabaseFactory {
     private static $tenant_connections = [];
 
@@ -178,7 +190,7 @@ class TenantDatabaseFactory {
                 @mkdir($dir, 0777, true);
             }
             @chmod($dir, 0777);
-            if (is_dir($dir) && is_writable($dir)) {
+            if (is_dir_writable_safe($dir)) {
                 return $target;
             }
         }
