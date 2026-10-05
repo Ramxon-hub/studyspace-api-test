@@ -21,7 +21,8 @@ require_once __DIR__ . '/../config/master_db.php';
 
 $app_env = defined('APP_ENV') ? APP_ENV : (getenv('APP_ENV') ?: 'production');
 $db_connected = false;
-$db_path_label = 'unknown';
+$db_path_label = function_exists('get_master_db_path') ? get_master_db_path() : 'unknown';
+$db_error = null;
 
 try {
     if (function_exists('get_master_pdo')) {
@@ -29,18 +30,24 @@ try {
         $chk = $master_pdo->query("SELECT COUNT(*) FROM libraries");
         if ($chk !== false) {
             $db_connected = true;
-            $db_path_label = ($app_env === 'deplexo_test') ? 'persistent_test_database' : 'master_database';
         }
     }
 } catch (Throwable $e) {
     $db_connected = false;
+    $db_error = $e->getMessage();
 }
 
-echo json_encode([
+$response = [
     'success' => true,
     'environment' => $app_env,
     'database' => $db_connected ? 'connected' : 'disconnected',
     'database_path' => $db_path_label,
     'php_version' => PHP_VERSION,
     'server' => $_SERVER['SERVER_SOFTWARE'] ?? 'Apache'
-], JSON_PRETTY_PRINT);
+];
+
+if (!$db_connected && $db_error) {
+    $response['database_error'] = $db_error;
+}
+
+echo json_encode($response, JSON_PRETTY_PRINT);

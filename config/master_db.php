@@ -17,6 +17,9 @@ function get_master_db_path() {
         }
         return '/data/studyspace_master_test.sqlite';
     }
+    if (is_dir('/data')) {
+        return '/data/studyspace_master.sqlite';
+    }
     $dir = __DIR__ . '/../data';
     if (!file_exists($dir)) {
         @mkdir($dir, 0777, true);
