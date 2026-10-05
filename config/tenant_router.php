@@ -101,27 +101,41 @@ class TenantDatabaseFactory {
             $db_file = self::resolveTenantDbPath($library_code, $cfg['db_file'] ?? null);
             $dir = dirname($db_file);
 
-            // Enforce safe writable directory check for SQLite journal/lock file creation
-            if (!is_dir_writable_safe($dir)) {
+            $target_file = $db_file;
+            if (file_exists($db_file) && !is_writable($db_file)) {
                 $writable_fallback = sys_get_temp_dir() . '/' . basename($db_file);
-                if (file_exists($db_file) && is_readable($db_file)) {
-                    if (!file_exists($writable_fallback) || filemtime($db_file) > filemtime($writable_fallback)) {
-                        @copy($db_file, $writable_fallback);
-                    }
-                    @chmod($writable_fallback, 0777);
-                    $db_file = $writable_fallback;
-                } else {
-                    $db_file = $writable_fallback;
+                if (!file_exists($writable_fallback) || filemtime($db_file) > filemtime($writable_fallback)) {
+                    @copy($db_file, $writable_fallback);
                 }
+                @chmod($writable_fallback, 0777);
+                $target_file = $writable_fallback;
             }
 
-            $tenant_pdo = new PDO("sqlite:" . $db_file);
-            $tenant_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            $tenant_pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-            try { $tenant_pdo->exec("PRAGMA foreign_keys = ON;"); } catch (Exception $e) {}
-            try { $tenant_pdo->exec("PRAGMA journal_mode = WAL;"); } catch (Exception $e) {}
-            try { $tenant_pdo->exec("PRAGMA busy_timeout = 10000;"); } catch (Exception $e) {}
-            try { $tenant_pdo->exec("PRAGMA synchronous = NORMAL;"); } catch (Exception $e) {}
+            try {
+                $tenant_pdo = new PDO("sqlite:" . $target_file);
+                $tenant_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                $tenant_pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+                try { $tenant_pdo->exec("PRAGMA foreign_keys = ON;"); } catch (Exception $e) {}
+                try { $tenant_pdo->exec("PRAGMA journal_mode = WAL;"); } catch (Exception $e) {}
+                try { $tenant_pdo->exec("PRAGMA busy_timeout = 10000;"); } catch (Exception $e) {}
+                try { $tenant_pdo->exec("PRAGMA synchronous = NORMAL;"); } catch (Exception $e) {}
+            } catch (Exception $pdo_err) {
+                // If opening target file failed for any OS permission reason, copy to temp directory and open
+                $fallback_file = sys_get_temp_dir() . '/' . basename($db_file);
+                if (file_exists($db_file) && is_readable($db_file)) {
+                    @copy($db_file, $fallback_file);
+                    @chmod($fallback_file, 0777);
+                    $tenant_pdo = new PDO("sqlite:" . $fallback_file);
+                    $tenant_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                    $tenant_pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+                    try { $tenant_pdo->exec("PRAGMA foreign_keys = ON;"); } catch (Exception $e) {}
+                    try { $tenant_pdo->exec("PRAGMA journal_mode = WAL;"); } catch (Exception $e) {}
+                    try { $tenant_pdo->exec("PRAGMA busy_timeout = 10000;"); } catch (Exception $e) {}
+                    try { $tenant_pdo->exec("PRAGMA synchronous = NORMAL;"); } catch (Exception $e) {}
+                } else {
+                    throw $pdo_err;
+                }
+            }
         }
 
         // Initialize tenant schema (all 12 tables + migrations)
