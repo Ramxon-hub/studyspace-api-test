@@ -148,16 +148,17 @@ class TenantDatabaseFactory {
             }
         }
 
-        // 2. If file does not exist, pick a writable location for database creation
+        // 2. If file does not exist, pick a directory where www-data CAN create new files
+        if (!file_exists($data_dir)) {
+            @mkdir($data_dir, 0777, true);
+        }
+        @chmod($data_dir, 0777);
+
         @chmod('/data', 0777);
         if (is_dir('/data') && is_writable('/data')) {
             return '/data/tenant_' . $lc_code . '.sqlite';
         }
 
-        if (!file_exists($data_dir)) {
-            @mkdir($data_dir, 0777, true);
-        }
-        @chmod($data_dir, 0777);
         return $data_dir . '/tenant_' . $lc_code . '.sqlite';
     }
 
