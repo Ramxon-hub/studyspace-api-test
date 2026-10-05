@@ -116,7 +116,7 @@ class TenantDatabaseFactory {
                 $tenant_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
                 $tenant_pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
                 try { $tenant_pdo->exec("PRAGMA foreign_keys = ON;"); } catch (Exception $e) {}
-                try { $tenant_pdo->exec("PRAGMA journal_mode = WAL;"); } catch (Exception $e) {}
+                try { $tenant_pdo->exec("PRAGMA journal_mode = DELETE;"); } catch (Exception $e) {}
                 try { $tenant_pdo->exec("PRAGMA busy_timeout = 10000;"); } catch (Exception $e) {}
                 try { $tenant_pdo->exec("PRAGMA synchronous = NORMAL;"); } catch (Exception $e) {}
             } catch (Exception $pdo_err) {
@@ -129,7 +129,7 @@ class TenantDatabaseFactory {
                     $tenant_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
                     $tenant_pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
                     try { $tenant_pdo->exec("PRAGMA foreign_keys = ON;"); } catch (Exception $e) {}
-                    try { $tenant_pdo->exec("PRAGMA journal_mode = WAL;"); } catch (Exception $e) {}
+                    try { $tenant_pdo->exec("PRAGMA journal_mode = DELETE;"); } catch (Exception $e) {}
                     try { $tenant_pdo->exec("PRAGMA busy_timeout = 10000;"); } catch (Exception $e) {}
                     try { $tenant_pdo->exec("PRAGMA synchronous = NORMAL;"); } catch (Exception $e) {}
                 } else {
