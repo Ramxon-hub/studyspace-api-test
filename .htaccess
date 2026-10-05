@@ -14,8 +14,9 @@ Options -Indexes
     </IfModule>
 </FilesMatch>
 
-# Restrict Access to Internal Directories
+# Restrict Access to Internal Directories & Preserve Authorization Header
 <IfModule mod_rewrite.c>
     RewriteEngine On
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
     RewriteRule ^(config|data|scripts|scratch|logs)/ - [F,L]
 </IfModule>

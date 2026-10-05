@@ -47,16 +47,39 @@ if (file_exists($target_master) || file_exists($target_tenant)) {
 }
 
 // 3. Authorization Bearer Token Verification
-$expected_token = getenv('PRODUCTION_DB_UPLOAD_TOKEN') ?: (defined('PRODUCTION_DB_UPLOAD_TOKEN') ? PRODUCTION_DB_UPLOAD_TOKEN : null);
+$expected_token = function_exists('env_get') ? env_get('PRODUCTION_DB_UPLOAD_TOKEN') : (getenv('PRODUCTION_DB_UPLOAD_TOKEN') ?: ($_ENV['PRODUCTION_DB_UPLOAD_TOKEN'] ?? ($_SERVER['PRODUCTION_DB_UPLOAD_TOKEN'] ?? null)));
+
+if (empty($expected_token) && defined('PRODUCTION_DB_UPLOAD_TOKEN')) {
+    $expected_token = PRODUCTION_DB_UPLOAD_TOKEN;
+}
 
 if (empty($expected_token)) {
     respond_json(500, false, 'PRODUCTION_DB_UPLOAD_TOKEN environment variable is not configured on server.');
 }
 
-$auth_header = $_SERVER['HTTP_AUTHORIZATION'] ?? ($_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
+$auth_header = '';
+if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
+    $auth_header = $_SERVER['HTTP_AUTHORIZATION'];
+} elseif (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+    $auth_header = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+} else {
+    $headers = [];
+    if (function_exists('apache_request_headers')) {
+        $headers = apache_request_headers();
+    } elseif (function_exists('getallheaders')) {
+        $headers = getallheaders();
+    }
+    
+    if (!empty($headers['Authorization'])) {
+        $auth_header = $headers['Authorization'];
+    } elseif (!empty($headers['authorization'])) {
+        $auth_header = $headers['authorization'];
+    }
+}
+
 $provided_token = null;
 
-if (preg_match('/Bearer\s+(.*)$/i', $auth_header, $matches)) {
+if (preg_match('/Bearer\s+(.*)$/i', trim($auth_header), $matches)) {
     $provided_token = trim($matches[1]);
 } elseif (!empty($_POST['token'])) {
     $provided_token = trim($_POST['token']);
