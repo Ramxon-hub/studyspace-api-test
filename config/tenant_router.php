@@ -100,28 +100,22 @@ class TenantDatabaseFactory {
             // Default: SQLite Database Per Tenant
             $db_file = self::resolveTenantDbPath($library_code, $cfg['db_file'] ?? null);
             $dir = dirname($db_file);
-            if (!file_exists($dir)) {
-                @mkdir($dir, 0777, true);
-            }
-            @chmod($dir, 0777);
-            if (file_exists($db_file)) {
-                @chmod($db_file, 0777);
-            }
-            try {
-                $tenant_pdo = new PDO("sqlite:" . $db_file);
-            } catch (Exception $e) {
-                // Fallback: If opening $db_file failed due to OS file/dir permission lock, copy to writable temp location
-                $fallback_file = sys_get_temp_dir() . '/' . basename($db_file);
+
+            // Enforce safe writable directory check for SQLite journal/lock file creation
+            if (!is_dir_writable_safe($dir)) {
+                $writable_fallback = sys_get_temp_dir() . '/' . basename($db_file);
                 if (file_exists($db_file) && is_readable($db_file)) {
-                    if (!file_exists($fallback_file) || filemtime($db_file) > filemtime($fallback_file)) {
-                        @copy($db_file, $fallback_file);
+                    if (!file_exists($writable_fallback) || filemtime($db_file) > filemtime($writable_fallback)) {
+                        @copy($db_file, $writable_fallback);
                     }
-                    @chmod($fallback_file, 0777);
-                    $tenant_pdo = new PDO("sqlite:" . $fallback_file);
+                    @chmod($writable_fallback, 0777);
+                    $db_file = $writable_fallback;
                 } else {
-                    throw new Exception("Unable to open database file at [$db_file]: " . $e->getMessage());
+                    $db_file = $writable_fallback;
                 }
             }
+
+            $tenant_pdo = new PDO("sqlite:" . $db_file);
             $tenant_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             $tenant_pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
             try { $tenant_pdo->exec("PRAGMA foreign_keys = ON;"); } catch (Exception $e) {}
