@@ -37,6 +37,7 @@ class TenantDatabaseFactory {
         $stmt_lib = $master_pdo->prepare("SELECT id, name, status FROM libraries WHERE library_code = ?");
         $stmt_lib->execute([$library_code]);
         $lib = $stmt_lib->fetch();
+        $stmt_lib->closeCursor();
 
         if (!$lib) {
             throw new Exception("Unregistered library code: " . $library_code);
@@ -54,6 +55,7 @@ class TenantDatabaseFactory {
         $stmt_sub = $master_pdo->prepare("SELECT plan_name, max_students, valid_until, status FROM subscriptions WHERE library_code = ?");
         $stmt_sub->execute([$library_code]);
         $sub = $stmt_sub->fetch();
+        $stmt_sub->closeCursor();
 
         if ($sub) {
             if ($sub['status'] === 'expired' || ($sub['valid_until'] && $sub['valid_until'] < date('Y-m-d'))) {
@@ -65,6 +67,7 @@ class TenantDatabaseFactory {
         $stmt_cfg = $master_pdo->prepare("SELECT db_driver, db_host, db_port, db_name, db_user, db_pass, db_file FROM tenant_db_configs WHERE library_code = ?");
         $stmt_cfg->execute([$library_code]);
         $cfg = $stmt_cfg->fetch();
+        $stmt_cfg->closeCursor();
 
         if (!$cfg) {
             throw new Exception("Missing database configuration for library: " . $library_code);
@@ -111,9 +114,9 @@ class TenantDatabaseFactory {
             $tenant_pdo = new PDO("sqlite:" . $db_file);
             $tenant_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             $tenant_pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-            try { $tenant_pdo->exec("PRAGMA foreign_keys = ON;"); } catch (Exception $e) {}
-            try { $tenant_pdo->exec("PRAGMA journal_mode = DELETE;"); } catch (Exception $e) {}
             try { $tenant_pdo->exec("PRAGMA busy_timeout = 10000;"); } catch (Exception $e) {}
+            try { $tenant_pdo->exec("PRAGMA foreign_keys = ON;"); } catch (Exception $e) {}
+            try { $tenant_pdo->exec("PRAGMA journal_mode = WAL;"); } catch (Exception $e) {}
             try { $tenant_pdo->exec("PRAGMA synchronous = NORMAL;"); } catch (Exception $e) {}
         }
 
@@ -184,7 +187,16 @@ class TenantDatabaseFactory {
     }
 
     public static function clearCache() {
+        foreach (self::$tenant_connections as $code => $pdo) {
+            if ($pdo instanceof PDO) {
+                try { $pdo->exec("PRAGMA wal_checkpoint(TRUNCATE);"); } catch (Exception $e) {}
+            }
+            self::$tenant_connections[$code] = null;
+        }
         self::$tenant_connections = [];
+        if (function_exists('gc_collect_cycles')) {
+            gc_collect_cycles();
+        }
     }
 }
 

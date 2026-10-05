@@ -345,6 +345,7 @@ try {
             'provisioning_status' => $prov_success ? 'READY' : 'FAILED',
             'error' => $prov_error
         ]);
+        $tenant_pdo = null;
         if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'update_library') {
@@ -1382,6 +1383,12 @@ try {
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
+        try {
+            $chk_pdo = new PDO("sqlite:" . $src_file);
+            $chk_pdo->exec("PRAGMA wal_checkpoint(TRUNCATE);");
+            $chk_pdo = null;
+        } catch (Exception $e) {}
+
         $dest_file = $target_dir . '/' . $filename;
         if (!copy($src_file, $dest_file)) {
             http_response_code(500);
@@ -1552,6 +1559,11 @@ try {
         }
 
         TenantDatabaseFactory::clearCache();
+        if (function_exists('gc_collect_cycles')) @gc_collect_cycles();
+
+        if (file_exists($target_file . '-wal')) @unlink($target_file . '-wal');
+        if (file_exists($target_file . '-shm')) @unlink($target_file . '-shm');
+        if (file_exists($target_file)) @unlink($target_file);
 
         // Perform Restore Copy
         if (!copy($bk['file_path'], $target_file)) {

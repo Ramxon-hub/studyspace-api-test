@@ -308,6 +308,13 @@ function restore_db_snapshot($pdo) {
 
 // Function to initialize database tables and seed data if empty
 function init_database($pdo) {
+    try {
+        if (db_get_driver($pdo) === 'sqlite') {
+            $has_users = (int)$pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'")->fetchColumn();
+            if ($has_users > 0) return;
+        }
+    } catch (Exception $e) {}
+
     if (db_is_postgres()) {
         $pk_type = "SERIAL PRIMARY KEY";
         $real_type = "NUMERIC(10,2)";

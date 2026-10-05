@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 enum LibraryFlavor {
   studyspace,
@@ -52,8 +53,20 @@ class TenantConfig {
 
   static TenantConfig get current => _current;
 
-  static void initialize(LibraryFlavor flavor) {
-    switch (flavor) {
+  static void initialize([LibraryFlavor? flavor]) {
+    final String? buildFlavor = appFlavor;
+    if (flavor == null && buildFlavor != null) {
+      if (buildFlavor == 'lib002') {
+        flavor = LibraryFlavor.lib002;
+      } else if (buildFlavor == 'superadmin') {
+        flavor = LibraryFlavor.superadmin;
+      } else if (buildFlavor == 'lib001' || buildFlavor == 'studyspace') {
+        flavor = LibraryFlavor.lib001;
+      }
+    }
+    
+    final targetFlavor = flavor ?? LibraryFlavor.lib001;
+    switch (targetFlavor) {
       case LibraryFlavor.studyspace:
       case LibraryFlavor.lib001:
         _current = studyspaceConfig;
