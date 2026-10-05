@@ -17,9 +17,24 @@ require_once __DIR__ . '/../config/master_db.php';
 
 $code = $_GET['code'] ?? ($_GET['library_code'] ?? ($_SERVER['HTTP_X_LIBRARY_CODE'] ?? 'LIB001'));
 $code = strtoupper(trim((string)$code));
+$action = $_GET['action'] ?? '';
 
 try {
     $master_pdo = get_master_pdo();
+
+    if (isset($_GET['list']) || $action === 'list' || $code === 'ALL') {
+        $stmt = $master_pdo->query("
+            SELECT l.library_code as code, l.name, l.status,
+                   b.logo_url, b.primary_color, b.contact_phone as phone, b.address, b.tagline
+            FROM libraries l
+            LEFT JOIN library_branding b ON l.library_code = b.library_code
+            WHERE l.status = 'active'
+            ORDER BY l.id ASC
+        ");
+        $libs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        echo json_encode(['success' => true, 'libraries' => $libs]);
+        exit();
+    }
 
     $stmt = $master_pdo->prepare("
         SELECT l.library_code, l.name, l.status,

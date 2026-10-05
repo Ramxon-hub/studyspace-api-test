@@ -188,8 +188,53 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _isSuperAdmin = false;
+  String? _superAdminUsername;
+
+  bool get isSuperAdmin => _isSuperAdmin;
+  String? get superAdminUsername => _superAdminUsername;
+
+  Future<bool> superAdminLogin(String username, String password) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    final result = await ApiService.superAdminLogin(username, password);
+
+    _isLoading = false;
+    if (result['success'] == true) {
+      _isSuperAdmin = true;
+      _superAdminUsername = result['username']?.toString() ?? username;
+      _currentUser = UserModel(
+        id: 0,
+        name: 'Super Admin (${_superAdminUsername})',
+        email: result['email']?.toString() ?? 'superadmin@studyspace.com',
+        phone: '',
+        role: 'super_admin',
+        status: 'approved',
+      );
+      notifyListeners();
+      return true;
+    } else {
+      _errorMessage = result['error']?.toString() ?? result['message']?.toString() ?? 'Super Admin login failed';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> superAdminLogout() async {
+    await ApiService.superAdminCall('logout');
+    _isSuperAdmin = false;
+    _superAdminUsername = null;
+    ApiService.superAdminToken = null;
+    await logout();
+  }
+
   Future<void> logout() async {
     _currentUser = null;
+    _isSuperAdmin = false;
+    _superAdminUsername = null;
+    ApiService.superAdminToken = null;
     NativeNotificationService.stopNativeService();
     try {
       final file = _getSessionFile();

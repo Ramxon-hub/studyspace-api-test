@@ -868,4 +868,61 @@ class ApiService {
       return {'success': false, 'message': 'Failed to load 12-month fee matrix: $e'};
     }
   }
+
+  // ==========================================
+  // SUPER ADMIN PLATFORM API SERVICES
+  // ==========================================
+  static String? superAdminToken;
+
+  static Map<String, String> get superAdminHeaders => {
+    if (superAdminToken != null && superAdminToken!.isNotEmpty)
+      'Authorization': 'Bearer $superAdminToken',
+    'X-Super-Admin-Key': 'superadmin_secret_key_2026',
+  };
+
+  static Future<Map<String, dynamic>> superAdminLogin(String username, String password) async {
+    try {
+      final response = await http.post(
+        Uri.parse(ApiConfig.jsonSuperAdmin),
+        body: {'action': 'login', 'username': username, 'password': password},
+      ).timeout(_timeout);
+      final res = _safeDecodeResponse(response);
+      if (res['success'] == true && res['token'] != null) {
+        superAdminToken = res['token'].toString();
+      }
+      return res;
+    } catch (e) {
+      return {'success': false, 'error': 'Connection error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> superAdminCall(String action, [Map<String, String>? bodyParams]) async {
+    try {
+      final map = <String, String>{'action': action};
+      if (bodyParams != null) {
+        map.addAll(bodyParams);
+      }
+      final response = await http.post(
+        Uri.parse(ApiConfig.jsonSuperAdmin),
+        headers: superAdminHeaders,
+        body: map,
+      ).timeout(_timeout);
+      return _safeDecodeResponse(response);
+    } catch (e) {
+      return {'success': false, 'error': 'Connection error: $e'};
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getPublicLibrariesList() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonTenant}?action=list'),
+      ).timeout(_timeout);
+      final res = _safeDecodeResponse(response);
+      if (res['success'] == true && res['libraries'] is List) {
+        return List<Map<String, dynamic>>.from(res['libraries']);
+      }
+    } catch (_) {}
+    return [];
+  }
 }

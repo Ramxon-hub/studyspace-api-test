@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/tenant_provider.dart';
 import 'login_screen.dart';
+import 'super_admin_login_screen.dart';
 
 class LibrarySelectorScreen extends StatefulWidget {
   const LibrarySelectorScreen({Key? key}) : super(key: key);
@@ -293,6 +294,28 @@ class _LibrarySelectorScreenState extends State<LibrarySelectorScreen> {
                         ),
                       ),
                     ],
+                  ),
+
+                  const SizedBox(height: 24),
+                  const Divider(color: Color(0xFF334155)),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFA78BFA),
+                      side: const BorderSide(color: Color(0xFF7C3AED)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () {
+                      Navigator.of(context).pushReplacement(
+                        MaterialPageRoute(builder: (_) => const SuperAdminLoginScreen()),
+                      );
+                    },
+                    icon: const Icon(Icons.stars_rounded, color: Color(0xFFA78BFA), size: 20),
+                    label: const Text(
+                      "Super Admin Platform Portal",
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    ),
                   ),
 
                 ],

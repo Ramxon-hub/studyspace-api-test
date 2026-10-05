@@ -22,12 +22,61 @@ $input = !empty($raw_input) ? (json_decode($raw_input, true) ?: []) : [];
 $_POST = array_merge($_POST, $input);
 $_GET = array_merge($_GET, $input);
 
-if (session_status() === PHP_SESSION_NONE) @session_start();
+$action = $_GET['action'] ?? ($_POST['action'] ?? 'dashboard_stats');
+$master_pdo = get_master_pdo();
+
+if ($action === 'login') {
+    $username = trim($_POST['username'] ?? ($_POST['email'] ?? ''));
+    $password = trim($_POST['password'] ?? '');
+
+    if (empty($username) || empty($password)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Username and password are required.']);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+    }
+
+    $stmt = $master_pdo->prepare("SELECT * FROM super_admins WHERE username = ? OR email = ?");
+    $stmt->execute([$username, $username]);
+    $sa = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($sa && password_verify($password, $sa['password_hash'])) {
+        if (session_status() === PHP_SESSION_NONE) @session_start();
+        $_SESSION['is_super_admin'] = true;
+        $_SESSION['role'] = 'super_admin';
+        $_SESSION['super_admin_user'] = $sa['username'];
+        $token = 'SA_TOKEN_' . bin2hex(random_bytes(16));
+        $_SESSION['super_admin_token'] = $token;
+
+        log_super_admin_action($master_pdo, 'super_admin_login', $sa['username'], null, 'SUCCESS');
+
+        echo json_encode([
+            'success' => true,
+            'message' => 'Super Admin authenticated successfully.',
+            'token' => $token,
+            'role' => 'super_admin',
+            'username' => $sa['username'],
+            'email' => $sa['email']
+        ]);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+    } else {
+        log_super_admin_action($master_pdo, 'super_admin_login_failed', $username, null, 'FAILED');
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'Invalid Super Admin username or password.']);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+    }
+}
+
+$auth_header = $_SERVER['HTTP_AUTHORIZATION'] ?? ($_SERVER['HTTP_X_SUPER_ADMIN_TOKEN'] ?? '');
+if (strpos($auth_header, 'Bearer ') === 0) {
+    $bearer_token = trim(substr($auth_header, 7));
+} else {
+    $bearer_token = trim($auth_header);
+}
 
 $admin_key = $_SERVER['HTTP_X_SUPER_ADMIN_KEY'] ?? ($_GET['super_key'] ?? ($_POST['super_key'] ?? ''));
 $expected_key = env_get('SUPER_ADMIN_KEY', 'superadmin_secret_key_2026');
 
-$is_super_admin_session = !empty($_SESSION['is_super_admin']) || (!empty($_SESSION['role']) && $_SESSION['role'] === 'super_admin');
+$is_super_admin_session = !empty($_SESSION['is_super_admin']) || (!empty($_SESSION['role']) && $_SESSION['role'] === 'super_admin') || (!empty($bearer_token) && !empty($_SESSION['super_admin_token']) && $bearer_token === $_SESSION['super_admin_token']);
 $has_valid_key = (!empty($admin_key) && $admin_key === $expected_key);
 
 // Strict Security Enforcement: Reject non-Super Admin users (Normal Admins, Students, Parents)
@@ -37,8 +86,15 @@ if (!$is_super_admin_session && !$has_valid_key) {
     if (defined('IN_TEST_SUITE')) return; else exit();
 }
 
-$action = $_GET['action'] ?? ($_POST['action'] ?? 'dashboard_stats');
-$master_pdo = get_master_pdo();
+if ($action === 'logout') {
+    if (session_status() === PHP_SESSION_NONE) @session_start();
+    log_super_admin_action($master_pdo, 'super_admin_logout', $_SESSION['super_admin_user'] ?? 'superadmin', null, 'SUCCESS');
+    unset($_SESSION['is_super_admin'], $_SESSION['role'], $_SESSION['super_admin_user'], $_SESSION['super_admin_token']);
+    @session_destroy();
+    echo json_encode(['success' => true, 'message' => 'Super Admin logged out successfully.']);
+    if (defined('IN_TEST_SUITE')) return; else exit();
+}
+
 $super_admin_user = $_SESSION['super_admin_user'] ?? 'superadmin';
 
 try {
