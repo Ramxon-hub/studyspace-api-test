@@ -140,17 +140,24 @@ class TenantDatabaseFactory {
             array_unshift($candidates, $configured_file);
         }
 
+        // 1. Check existing files first across all known paths
         foreach ($candidates as $candidate) {
             if (!empty($candidate) && file_exists($candidate)) {
+                @chmod($candidate, 0777);
                 return $candidate;
             }
         }
 
-        // Fallback: if persistent /data directory exists, use /data/tenant_{code}.sqlite
-        if (is_dir('/data')) {
+        // 2. If file does not exist, pick a writable location for database creation
+        @chmod('/data', 0777);
+        if (is_dir('/data') && is_writable('/data')) {
             return '/data/tenant_' . $lc_code . '.sqlite';
         }
 
+        if (!file_exists($data_dir)) {
+            @mkdir($data_dir, 0777, true);
+        }
+        @chmod($data_dir, 0777);
         return $data_dir . '/tenant_' . $lc_code . '.sqlite';
     }
 
