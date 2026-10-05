@@ -34,18 +34,23 @@ android {
     productFlavors {
         studyspace {
             dimension "default"
-            applicationId "com.studyspace.library"
-            resValue "string", "app_name", "StudySpace"
+            applicationId "com.studyspace.lib001"
+            resValue "string", "app_name", "StudySpace LIB001"
         }
-        library_abc {
+        lib001 {
             dimension "default"
-            applicationId "com.libraryabc.app"
-            resValue "string", "app_name", "ABC Library"
+            applicationId "com.studyspace.lib001"
+            resValue "string", "app_name", "StudySpace LIB001"
         }
-        library_xyz {
+        lib002 {
             dimension "default"
-            applicationId "com.libraryxyz.app"
-            resValue "string", "app_name", "XYZ Library"
+            applicationId "com.studyspace.lib002"
+            resValue "string", "app_name", "StudySpace LIB002"
+        }
+        superadmin {
+            dimension "default"
+            applicationId "com.studyspace.superadmin"
+            resValue "string", "app_name", "StudySpace Super Admin"
         }
     }
 

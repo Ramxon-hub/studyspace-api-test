@@ -221,6 +221,9 @@ function resolve_tenant_context() {
         
         // If client manually attempts to pass a differing X-Library-Code header or parameter, REJECT immediately!
         if (!empty($requested_code) && strtoupper(trim($requested_code)) !== strtoupper(trim($authenticated_code))) {
+            if (defined('IN_TEST_SUITE')) {
+                throw new Exception('CROSS-TENANT ACCESS FORBIDDEN: Authenticated session belongs to tenant ' . $authenticated_code . '. Header/Parameter spoofing detected.');
+            }
             http_response_code(403);
             header('Content-Type: application/json');
             echo json_encode([
@@ -246,6 +249,9 @@ function resolve_tenant_context() {
             'pdo' => $pdo
         ];
     } catch (Exception $e) {
+        if (defined('IN_TEST_SUITE')) {
+            throw $e;
+        }
         http_response_code(400);
         header('Content-Type: application/json');
         echo json_encode([

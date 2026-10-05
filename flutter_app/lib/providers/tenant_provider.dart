@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config/tenant_config.dart';
 import '../services/api_service.dart';
 
 class TenantModel {
@@ -87,6 +88,23 @@ class TenantProvider with ChangeNotifier {
 
   Future<void> loadSavedTenant() async {
     try {
+      if (TenantConfig.current.isSingleTenant) {
+        _currentTenant = TenantModel(
+          code: TenantConfig.current.tenantCode,
+          name: TenantConfig.current.libraryName,
+          status: 'active',
+          tagline: TenantConfig.current.libraryTagline,
+          logoUrl: '',
+          primaryColor: TenantConfig.current.primaryColor,
+          phone: TenantConfig.current.libraryPhone,
+          address: TenantConfig.current.libraryAddress,
+          planName: 'Standard',
+        );
+        ApiService.activeLibraryCode = _currentTenant!.code;
+        notifyListeners();
+        return;
+      }
+
       final prefs = await SharedPreferences.getInstance();
       final savedJsonStr = prefs.getString('saved_tenant_config');
       if (savedJsonStr != null && savedJsonStr.isNotEmpty) {

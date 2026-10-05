@@ -278,6 +278,22 @@ function init_master_database($master_pdo) {
         updated_at $dt_type DEFAULT CURRENT_TIMESTAMP
     )");
 
+    // 13. APK Build Metadata Table (Phase 42 True Library-Isolated Architecture)
+    $master_pdo->exec("CREATE TABLE IF NOT EXISTS apk_build_metadata (
+        id $pk_type,
+        build_id VARCHAR(100) NOT NULL UNIQUE,
+        library_code VARCHAR(50) NOT NULL,
+        flavor_name VARCHAR(100) NOT NULL,
+        package_id VARCHAR(255) NOT NULL,
+        version_name VARCHAR(50) DEFAULT '1.0.0',
+        build_number INT DEFAULT 1,
+        artifact_path TEXT,
+        sha256_hash VARCHAR(64),
+        status VARCHAR(30) NOT NULL DEFAULT 'CONFIGURED',
+        created_at $dt_type DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (library_code) REFERENCES libraries(library_code) ON DELETE CASCADE
+    )");
+
     // Seed Default Support Settings if empty
     $supp_count = (int)$master_pdo->query("SELECT COUNT(*) FROM support_settings")->fetchColumn();
     if ($supp_count === 0) {

@@ -309,9 +309,13 @@ try {
             if (!empty($initial_admin_user) && !empty($initial_admin_pass)) {
                 $hash = password_hash($initial_admin_pass, PASSWORD_DEFAULT);
                 $admin_email = filter_var($initial_admin_email, FILTER_VALIDATE_EMAIL) ? $initial_admin_email : "$initial_admin_user@$code.com";
-                $stmt_adm = $tenant_pdo->prepare("INSERT INTO users (name, email, phone, password, role) VALUES (?, ?, ?, ?, 'admin')");
-                $stmt_adm->execute(["Admin - $name", $admin_email, $phone ?: '+91 98765 00000', $hash]);
-                log_super_admin_action($master_pdo, 'admin_created', $super_admin_user, $code, 'SUCCESS', ['email' => $admin_email]);
+                $chk_adm = $tenant_pdo->prepare("SELECT COUNT(*) FROM users WHERE email = ?");
+                $chk_adm->execute([$admin_email]);
+                if ((int)$chk_adm->fetchColumn() === 0) {
+                    $stmt_adm = $tenant_pdo->prepare("INSERT INTO users (name, email, phone, password, role, status) VALUES (?, ?, ?, ?, 'admin', 'approved')");
+                    $stmt_adm->execute(["Admin - $name", $admin_email, $phone ?: '+91 98765 00000', $hash]);
+                    log_super_admin_action($master_pdo, 'admin_created', $super_admin_user, $code, 'SUCCESS', ['email' => $admin_email]);
+                }
             }
 
             $prov_success = true;
@@ -1328,6 +1332,334 @@ try {
         log_super_admin_action($master_pdo, 'SUPPORT_SETTINGS_UPDATED', $super_admin_user, null, 'SUCCESS', $settings);
 
         echo json_encode(['success' => true, 'message' => 'Support contact settings updated successfully.', 'settings' => $settings]);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+
+    } elseif ($action === 'list_backups') {
+        $code = strtoupper(trim($_GET['library_code'] ?? ($_POST['library_code'] ?? '')));
+        $query = "SELECT * FROM backup_metadata WHERE 1=1";
+        $params = [];
+        if (!empty($code)) {
+            $query .= " AND (library_code = ? OR scope = 'MASTER')";
+            $params[] = $code;
+        }
+        $query .= " ORDER BY id DESC LIMIT 100";
+        $stmt = $master_pdo->prepare($query);
+        $stmt->execute($params);
+        $backups = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        echo json_encode(['success' => true, 'backups' => $backups]);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+
+    } elseif ($action === 'create_backup') {
+        $code = strtoupper(trim($_POST['library_code'] ?? ($_GET['library_code'] ?? 'MASTER')));
+        $scope = ($code === 'MASTER') ? 'MASTER' : 'TENANT';
+
+        $backups_root = __DIR__ . '/../data/backups';
+        if (!file_exists($backups_root)) @mkdir($backups_root, 0777, true);
+
+        $target_dir = $backups_root . '/' . ($scope === 'MASTER' ? 'master' : $code);
+        if (!file_exists($target_dir)) @mkdir($target_dir, 0777, true);
+
+        $timestamp = date('Ymd_His');
+        if ($scope === 'MASTER') {
+            $src_file = get_master_db_path();
+            $filename = "studyspace_master_{$timestamp}.sqlite";
+        } else {
+            $stmt_chk = $master_pdo->prepare("SELECT id FROM libraries WHERE library_code = ?");
+            $stmt_chk->execute([$code]);
+            if (!$stmt_chk->fetch()) {
+                http_response_code(404);
+                echo json_encode(['success' => false, 'error' => "Library code not registered: $code"]);
+                if (defined('IN_TEST_SUITE')) return; else exit();
+            }
+            $src_file = TenantDatabaseFactory::resolveTenantDbPath($code);
+            $filename = "tenant_{$code}_{$timestamp}.sqlite";
+        }
+
+        if (!file_exists($src_file)) {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'error' => "Source database file does not exist: $src_file"]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $dest_file = $target_dir . '/' . $filename;
+        if (!copy($src_file, $dest_file)) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => "Failed to copy database file for backup."]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        @chmod($dest_file, 0777);
+        $file_size = filesize($dest_file);
+        $sha256 = hash_file('sha256', $dest_file);
+
+        // Verify SQLite Integrity of created backup
+        try {
+            $b_pdo = new PDO("sqlite:" . $dest_file);
+            $b_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $chk_res = $b_pdo->query("PRAGMA integrity_check")->fetchColumn();
+            if ($chk_res !== 'ok') {
+                @unlink($dest_file);
+                http_response_code(500);
+                echo json_encode(['success' => false, 'error' => "Backup failed integrity check: $chk_res"]);
+                if (defined('IN_TEST_SUITE')) return; else exit();
+            }
+            $b_pdo = null;
+        } catch (Exception $e) {
+            @unlink($dest_file);
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => "Backup integrity check failed: " . $e->getMessage()]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $backup_id = 'BK-' . ($scope === 'MASTER' ? 'MASTER' : $code) . '-' . $timestamp . '-' . rand(100, 999);
+        $stmt_ins = $master_pdo->prepare("
+            INSERT INTO backup_metadata (backup_id, scope, library_code, file_name, file_path, file_size, checksum, status, verified_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'VERIFIED', CURRENT_TIMESTAMP)
+        ");
+        $stmt_ins->execute([$backup_id, $scope, ($scope === 'MASTER' ? null : $code), $filename, $dest_file, $file_size, $sha256]);
+
+        log_super_admin_action($master_pdo, 'BACKUP_CREATED', $super_admin_user, ($scope === 'MASTER' ? null : $code), 'SUCCESS', [
+            'backup_id' => $backup_id,
+            'file_name' => $filename,
+            'sha256' => $sha256,
+            'file_size' => $file_size
+        ]);
+
+        echo json_encode([
+            'success' => true,
+            'message' => "Backup created successfully.",
+            'backup' => [
+                'backup_id' => $backup_id,
+                'scope' => $scope,
+                'library_code' => $code,
+                'file_name' => $filename,
+                'file_path' => $dest_file,
+                'file_size' => $file_size,
+                'checksum' => $sha256,
+                'created_at' => date('Y-m-d H:i:s')
+            ]
+        ]);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+
+    } elseif ($action === 'download_backup') {
+        $backup_id = trim($_GET['backup_id'] ?? ($_POST['backup_id'] ?? ''));
+        if (empty($backup_id)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Backup ID is required.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $stmt = $master_pdo->prepare("SELECT * FROM backup_metadata WHERE backup_id = ? OR id = ? OR file_name = ?");
+        $stmt->execute([$backup_id, is_numeric($backup_id) ? (int)$backup_id : 0, $backup_id]);
+        $bk = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$bk || !file_exists($bk['file_path'])) {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'error' => 'Backup file not found on disk.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        if (defined('IN_TEST_SUITE')) {
+            echo json_encode(['success' => true, 'backup' => $bk]);
+            return;
+        }
+
+        header('Content-Type: application/x-sqlite3');
+        header('Content-Disposition: attachment; filename="' . basename($bk['file_name']) . '"');
+        header('Content-Length: ' . filesize($bk['file_path']));
+        readfile($bk['file_path']);
+        exit();
+
+    } elseif ($action === 'restore_backup') {
+        $code = strtoupper(trim($_POST['library_code'] ?? ($_GET['library_code'] ?? '')));
+        $backup_id = trim($_POST['backup_id'] ?? ($_GET['backup_id'] ?? ''));
+
+        if (empty($code) || empty($backup_id)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Library code and backup ID are required.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $stmt = $master_pdo->prepare("SELECT * FROM backup_metadata WHERE backup_id = ? OR id = ? OR file_name = ?");
+        $stmt->execute([$backup_id, is_numeric($backup_id) ? (int)$backup_id : 0, $backup_id]);
+        $bk = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$bk) {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'error' => "Backup '$backup_id' not found in backup registry."]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        // STRICT TENANT MATCH SECURITY CHECK
+        if ($bk['scope'] === 'TENANT' && strtoupper(trim($bk['library_code'])) !== $code) {
+            http_response_code(400);
+            echo json_encode([
+                'success' => false,
+                'error' => "CROSS-TENANT RESTORE BLOCKED: Backup {$bk['backup_id']} belongs to tenant '{$bk['library_code']}', cannot restore into target tenant '$code'."
+            ]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        if (!file_exists($bk['file_path'])) {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'error' => "Backup file does not exist on disk: {$bk['file_path']}"]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        // Verify SHA256 Checksum on Backup File
+        $actual_sha256 = hash_file('sha256', $bk['file_path']);
+        if (!empty($bk['checksum']) && $actual_sha256 !== $bk['checksum']) {
+            http_response_code(400);
+            echo json_encode([
+                'success' => false,
+                'error' => "BACKUP CHECKSUM MISMATCH: Backup file hash ($actual_sha256) does not match recorded checksum ({$bk['checksum']}). Restoration aborted."
+            ]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        // Verify SQLite Integrity of Backup File
+        try {
+            $b_pdo = new PDO("sqlite:" . $bk['file_path']);
+            $b_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $chk_res = $b_pdo->query("PRAGMA integrity_check")->fetchColumn();
+            if ($chk_res !== 'ok') {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'error' => "Backup file failed SQLite integrity check: $chk_res. Restoration aborted."]);
+                if (defined('IN_TEST_SUITE')) return; else exit();
+            }
+            $b_pdo = null;
+        } catch (Exception $e) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => "Backup file failed SQLite integrity verification: " . $e->getMessage()]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        // Target File Resolution
+        if ($code === 'MASTER') {
+            $target_file = get_master_db_path();
+        } else {
+            $target_file = TenantDatabaseFactory::resolveTenantDbPath($code);
+        }
+
+        // CREATE PRE-RESTORE SAFETY SNAPSHOT
+        $backups_root = __DIR__ . '/../data/backups/' . strtolower($code);
+        if (!file_exists($backups_root)) @mkdir($backups_root, 0777, true);
+        $safety_file = $backups_root . '/pre_restore_safety_' . date('Ymd_His') . '.sqlite';
+
+        if (file_exists($target_file)) {
+            copy($target_file, $safety_file);
+        }
+
+        TenantDatabaseFactory::clearCache();
+
+        // Perform Restore Copy
+        if (!copy($bk['file_path'], $target_file)) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => "Failed to copy backup file over target database."]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+        @chmod($target_file, 0777);
+
+        // Post-Restore Integrity & Foreign Key Check
+        try {
+            $t_pdo = new PDO("sqlite:" . $target_file);
+            $t_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $t_chk = $t_pdo->query("PRAGMA integrity_check")->fetchColumn();
+            $fk_errs = $t_pdo->query("PRAGMA foreign_key_check")->fetchAll();
+            if ($t_chk !== 'ok' || count($fk_errs) > 0) {
+                // Revert from safety snapshot
+                if (file_exists($safety_file)) {
+                    copy($safety_file, $target_file);
+                }
+                http_response_code(500);
+                echo json_encode(['success' => false, 'error' => "Restored database failed post-restore verification. Reverted to safety snapshot."]);
+                if (defined('IN_TEST_SUITE')) return; else exit();
+            }
+            $t_pdo = null;
+        } catch (Exception $e) {
+            if (file_exists($safety_file)) copy($safety_file, $target_file);
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => "Post-restore database verification exception: " . $e->getMessage()]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        log_super_admin_action($master_pdo, 'RESTORE_EXECUTED', $super_admin_user, $code, 'SUCCESS', [
+            'backup_id' => $bk['backup_id'],
+            'safety_snapshot' => $safety_file,
+            'sha256' => $actual_sha256
+        ]);
+
+        echo json_encode([
+            'success' => true,
+            'message' => "Database for $code successfully restored from backup {$bk['backup_id']}.",
+            'library_code' => $code,
+            'backup_id' => $bk['backup_id'],
+            'safety_snapshot' => $safety_file
+        ]);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+
+    } elseif ($action === 'generate_apk_config') {
+        $code = strtoupper(trim($_POST['library_code'] ?? ($_GET['library_code'] ?? '')));
+        if (empty($code)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Library code is required.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $stmt = $master_pdo->prepare("
+            SELECT l.library_code, l.name, l.status,
+                   b.logo_url, b.primary_color, b.contact_phone, b.address, b.tagline,
+                   s.plan_name, s.valid_until
+            FROM libraries l
+            LEFT JOIN library_branding b ON l.library_code = b.library_code
+            LEFT JOIN subscriptions s ON l.library_code = s.library_code
+            WHERE l.library_code = ?
+        ");
+        $stmt->execute([$code]);
+        $lib = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$lib) {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'error' => "Library code not found: $code"]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $flavor_name = strtolower($code);
+        $package_id = "com.studyspace." . $flavor_name;
+        $build_id = "APK-BUILD-" . $code . "-" . date('YmdHis');
+        $api_base_url = env_get('API_BASE_URL', 'https://studyspace-api-test.de.deplexo.com');
+
+        $build_config = [
+            'build_id' => $build_id,
+            'tenant_code' => $code,
+            'flavor_name' => $flavor_name,
+            'package_id' => $package_id,
+            'app_name' => $lib['name'],
+            'tagline' => $lib['tagline'] ?? 'Self Study Hall',
+            'primary_color' => $lib['primary_color'] ?? '#1D4ED8',
+            'logo_url' => $lib['logo_url'] ?? '',
+            'api_base_url' => $api_base_url,
+            'json_auth_endpoint' => $api_base_url . '/api/json_auth.php',
+            'json_tenant_endpoint' => $api_base_url . '/api/json_tenant.php?code=' . $code,
+            'json_admin_endpoint' => $api_base_url . '/api/json_admin_actions.php',
+            'json_parent_endpoint' => $api_base_url . '/api/json_parent_actions.php',
+            'created_at' => date('Y-m-d H:i:s')
+        ];
+
+        $stmt_ins = $master_pdo->prepare("
+            INSERT INTO apk_build_metadata (build_id, library_code, flavor_name, package_id, version_name, build_number, status)
+            VALUES (?, ?, ?, ?, '1.0.0', 1, 'CONFIGURED')
+        ");
+        $stmt_ins->execute([$build_id, $code, $flavor_name, $package_id]);
+
+        log_super_admin_action($master_pdo, 'APK_CONFIG_GENERATED', $super_admin_user, $code, 'SUCCESS', $build_config);
+
+        echo json_encode([
+            'success' => true,
+            'message' => "APK build configuration for library $code generated successfully.",
+            'build_config' => $build_config
+        ]);
         if (defined('IN_TEST_SUITE')) return; else exit();
 
     } else {

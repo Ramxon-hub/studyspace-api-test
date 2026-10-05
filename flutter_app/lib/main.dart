@@ -34,6 +34,8 @@ import 'screens/manage_shifts_screen.dart';
 import 'screens/db_backup_screen.dart';
 import 'screens/app_settings_screen.dart';
 
+import 'screens/super_admin_login_screen.dart';
+
 import 'package:workmanager/workmanager.dart';
 import 'services/notification_service.dart';
 
@@ -83,7 +85,9 @@ class StudyLibraryApp extends StatelessWidget {
     final authProvider = Provider.of<AuthProvider>(context);
 
     Widget homeWidget;
-    if (!tenantProvider.isLibrarySelected) {
+    if (TenantConfig.current.isSuperAdmin) {
+      homeWidget = const SuperAdminLoginScreen();
+    } else if (!tenantProvider.isLibrarySelected) {
       homeWidget = const LibrarySelectorScreen();
     } else if (authProvider.isLoggedIn) {
       if (authProvider.currentUser?.role == 'admin') {

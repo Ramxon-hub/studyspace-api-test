@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 
 enum LibraryFlavor {
   studyspace,
-  libraryAbc,
-  libraryXyz,
+  lib001,
+  lib002,
+  superadmin,
 }
 
 class TenantConfig {
   final LibraryFlavor flavor;
   final String tenantId;
+  final String tenantCode;
   final String libraryName;
   final String libraryShortName;
   final String libraryTagline;
@@ -22,10 +24,13 @@ class TenantConfig {
   final String footerCredit;
   final IconData libraryIcon;
   final String apiBaseUrl;
+  final bool isSingleTenant;
+  final bool isSuperAdmin;
 
   const TenantConfig({
     required this.flavor,
     required this.tenantId,
+    required this.tenantCode,
     required this.libraryName,
     required this.libraryShortName,
     required this.libraryTagline,
@@ -39,6 +44,8 @@ class TenantConfig {
     required this.footerCredit,
     required this.libraryIcon,
     required this.apiBaseUrl,
+    this.isSingleTenant = true,
+    this.isSuperAdmin = false,
   });
 
   static TenantConfig _current = studyspaceConfig;
@@ -48,23 +55,25 @@ class TenantConfig {
   static void initialize(LibraryFlavor flavor) {
     switch (flavor) {
       case LibraryFlavor.studyspace:
+      case LibraryFlavor.lib001:
         _current = studyspaceConfig;
         break;
-      case LibraryFlavor.libraryAbc:
-        _current = libraryAbcConfig;
+      case LibraryFlavor.lib002:
+        _current = lib002Config;
         break;
-      case LibraryFlavor.libraryXyz:
-        _current = libraryXyzConfig;
+      case LibraryFlavor.superadmin:
+        _current = superadminConfig;
         break;
     }
   }
 
   // Pre-configured Tenant Settings
   static const TenantConfig studyspaceConfig = TenantConfig(
-    flavor: LibraryFlavor.studyspace,
-    tenantId: 'studyspace_keshav',
+    flavor: LibraryFlavor.lib001,
+    tenantId: 'lib001',
+    tenantCode: 'LIB001',
     libraryName: 'Keshav Library & Study Center',
-    libraryShortName: 'StudySpace',
+    libraryShortName: 'StudySpace LIB001',
     libraryTagline: 'SELF STUDY HALL',
     libraryPhone: '+91 98765 43210',
     libraryEmail: 'support@studyspace.com',
@@ -76,41 +85,47 @@ class TenantConfig {
     footerCredit: 'Ramxonwebwork',
     libraryIcon: Icons.menu_book_rounded,
     apiBaseUrl: 'https://studyspace-api-test.de.deplexo.com',
+    isSingleTenant: true,
   );
 
-  static const TenantConfig libraryAbcConfig = TenantConfig(
-    flavor: LibraryFlavor.libraryAbc,
-    tenantId: 'library_abc',
-    libraryName: 'ABC Competition Study Library',
-    libraryShortName: 'ABC Library',
+  static const TenantConfig lib002Config = TenantConfig(
+    flavor: LibraryFlavor.lib002,
+    tenantId: 'lib002',
+    tenantCode: 'LIB002',
+    libraryName: 'Demo Library 2',
+    libraryShortName: 'StudySpace LIB002',
     libraryTagline: 'PREMIER READING HALL',
-    libraryPhone: '+91 98000 11111',
-    libraryEmail: 'contact@abclibrary.com',
-    libraryAddress: '123 Academic Block, Zone 1',
+    libraryPhone: '+91 98765 00002',
+    libraryEmail: 'contact@lib002.com',
+    libraryAddress: '456 Knowledge Park, Block B',
     libraryLat: 19.0760,
     libraryLng: 72.8770,
     geofenceRadiusMeters: 50.0,
-    primaryColor: Color(0xFF059669),
+    primaryColor: Color(0xFF10B981),
     footerCredit: 'Ramxonwebwork',
     libraryIcon: Icons.local_library_rounded,
-    apiBaseUrl: 'https://library-abc-service-placeholder.onrender.com',
+    apiBaseUrl: 'https://studyspace-api-test.de.deplexo.com',
+    isSingleTenant: true,
   );
 
-  static const TenantConfig libraryXyzConfig = TenantConfig(
-    flavor: LibraryFlavor.libraryXyz,
-    tenantId: 'library_xyz',
-    libraryName: 'XYZ Exam Preparation Hall',
-    libraryShortName: 'XYZ Library',
-    libraryTagline: '24/7 STUDY CENTRE',
-    libraryPhone: '+91 97000 22222',
-    libraryEmail: 'help@xyzlibrary.com',
-    libraryAddress: '456 Knowledge Hub, Sector 4',
+  static const TenantConfig superadminConfig = TenantConfig(
+    flavor: LibraryFlavor.superadmin,
+    tenantId: 'superadmin',
+    tenantCode: 'SUPERADMIN',
+    libraryName: 'StudySpace Platform Control',
+    libraryShortName: 'Super Admin',
+    libraryTagline: 'SAAS MASTER CONTROL PANEL',
+    libraryPhone: '+91 98765 00000',
+    libraryEmail: 'superadmin@studyspace.com',
+    libraryAddress: 'HQ Control Center',
     libraryLat: 28.6139,
     libraryLng: 77.2090,
-    geofenceRadiusMeters: 50.0,
+    geofenceRadiusMeters: 500.0,
     primaryColor: Color(0xFF7C3AED),
     footerCredit: 'Ramxonwebwork',
-    libraryIcon: Icons.school_rounded,
-    apiBaseUrl: 'https://library-xyz-service-placeholder.onrender.com',
+    libraryIcon: Icons.admin_panel_settings_rounded,
+    apiBaseUrl: 'https://studyspace-api-test.de.deplexo.com',
+    isSingleTenant: true,
+    isSuperAdmin: true,
   );
 }
