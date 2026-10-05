@@ -117,30 +117,33 @@ class TenantDatabaseFactory {
      */
     public static function resolveTenantDbPath($library_code, $configured_file = null) {
         $library_code = strtoupper(trim((string)$library_code));
+        $lc_code = strtolower($library_code);
         
-        // 1. Direct match if configured path exists on the host
-        if (!empty($configured_file) && file_exists($configured_file)) {
-            return $configured_file;
+        // 1. Prioritize Deplexo / Production Persistent Disk Mount (/data/...)
+        $deplexo_primary = '/data/tenant_' . $lc_code . '.sqlite';
+        if (file_exists($deplexo_primary)) {
+            return $deplexo_primary;
         }
 
-        // 2. Direct match on Deplexo persistent disk mount (/data/filename.sqlite)
         if (!empty($configured_file)) {
-            $deplexo_path = '/data/' . basename($configured_file);
-            if (file_exists($deplexo_path)) {
-                return $deplexo_path;
+            $deplexo_configured = '/data/' . basename($configured_file);
+            if (file_exists($deplexo_configured)) {
+                return $deplexo_configured;
             }
         }
-        $deplexo_fallback = '/data/tenant_' . strtolower($library_code) . '.sqlite';
-        if (file_exists($deplexo_fallback)) {
-            return $deplexo_fallback;
+
+        if (defined('APP_ENV') && APP_ENV === 'deplexo_test' && file_exists('/data/studyspace_test.sqlite')) {
+            return '/data/studyspace_test.sqlite';
         }
 
-        // 3. Absolute path specification (e.g., /data/studyspace_test.sqlite)
-        if (!empty($configured_file) && (strpos($configured_file, '/') === 0 || strpos($configured_file, ':\\') !== false)) {
-            return $configured_file;
+        // 2. Direct match if configured path is ALREADY an absolute path on host
+        if (!empty($configured_file) && (strpos($configured_file, '/') === 0 || strpos($configured_file, ':\\') !== false || preg_match('/^[a-zA-Z]:\\\\/', $configured_file))) {
+            if (file_exists($configured_file)) {
+                return $configured_file;
+            }
         }
 
-        // 4. Resolve relative to app data directory using filename
+        // 3. Resolve relative to canonical App Data Directory using absolute path
         $data_dir = realpath(__DIR__ . '/../data') ?: (__DIR__ . '/../data');
         if (!empty($configured_file)) {
             $filename = basename($configured_file);
@@ -150,11 +153,17 @@ class TenantDatabaseFactory {
             }
         }
 
-        // 5. Fallback standard naming pattern
-        if (defined('APP_ENV') && APP_ENV === 'deplexo_test') {
-            return '/data/studyspace_test.sqlite';
+        $default_candidate = $data_dir . '/tenant_' . $lc_code . '.sqlite';
+        if (file_exists($default_candidate)) {
+            return $default_candidate;
         }
-        return $data_dir . '/tenant_' . strtolower($library_code) . '.sqlite';
+
+        // 4. Fallback default paths if creating new file
+        if (is_dir('/data')) {
+            return $deplexo_primary;
+        }
+
+        return $default_candidate;
     }
 
     public static function clearCache() {
@@ -171,9 +180,21 @@ function resolve_tenant_context() {
         @session_start();
     }
 
+    // Support raw JSON body parsing before resolving parameters
+    if (empty($_POST) && !empty($_SERVER['REQUEST_METHOD']) && in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT', 'PATCH'])) {
+        $json_raw = @file_get_contents('php://input');
+        if (!empty($json_raw)) {
+            $json_data = json_decode($json_raw, true);
+            if (is_array($json_data)) {
+                $_POST = array_merge($_POST, $json_data);
+                $_GET = array_merge($_GET, $json_data);
+            }
+        }
+    }
+
     // 1. Determine incoming requested library code
     $header_code = $_SERVER['HTTP_X_LIBRARY_CODE'] ?? ($_SERVER['X_LIBRARY_CODE'] ?? null);
-    $param_code = $_GET['code'] ?? ($_GET['library_code'] ?? ($_POST['library_code'] ?? null));
+    $param_code = $_GET['code'] ?? ($_GET['library_code'] ?? ($_POST['library_code'] ?? ($_GET['tenant_code'] ?? ($_POST['tenant_code'] ?? null))));
     $requested_code = !empty($header_code) ? $header_code : (!empty($param_code) ? $param_code : null);
 
     // 2. Strict Authenticated Session Enforcement
