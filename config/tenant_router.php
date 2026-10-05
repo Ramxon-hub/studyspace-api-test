@@ -95,7 +95,11 @@ class TenantDatabaseFactory {
             if (file_exists($db_file)) {
                 @chmod($db_file, 0777);
             }
-            $tenant_pdo = new PDO("sqlite:" . $db_file);
+            try {
+                $tenant_pdo = new PDO("sqlite:" . $db_file);
+            } catch (Exception $e) {
+                throw new Exception("Unable to open database file at [$db_file] (exists=" . (file_exists($db_file) ? "yes" : "no") . ", dir_writable=" . (is_writable(dirname($db_file)) ? "yes" : "no") . "): " . $e->getMessage());
+            }
             $tenant_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             $tenant_pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
             try { $tenant_pdo->exec("PRAGMA foreign_keys = ON;"); } catch (Exception $e) {}
