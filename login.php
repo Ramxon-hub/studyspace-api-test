@@ -36,10 +36,16 @@ $shifts = $pdo->query("SELECT * FROM shifts WHERE is_active = 1")->fetchAll();
 
         <!-- LOGIN TAB -->
         <div id="loginTab" class="tab-pane <?php echo $active_tab === 'login' ? 'active' : ''; ?>">
-            <h3 style="text-align: center; margin-bottom: 20px;">Welcome Back to <?php echo htmlspecialchars(LIBRARY_SHORT_NAME); ?></h3>
+            <h3 style="text-align: center; margin-bottom: 6px;">Welcome Back to <?php echo htmlspecialchars(LIBRARY_SHORT_NAME); ?></h3>
+            <div style="text-align: center; margin-bottom: 20px;">
+                <span class="badge badge-active" style="font-size: 0.82rem; padding: 4px 10px;">
+                    <i class="fas fa-building"></i> Tenant Code: <strong><?php echo htmlspecialchars($current_tenant_code); ?></strong>
+                </span>
+            </div>
             
             <form action="api/auth.php" method="POST">
                 <input type="hidden" name="action" value="login">
+                <input type="hidden" name="tenant_code" value="<?php echo htmlspecialchars($current_tenant_code); ?>">
                 
                 <div class="form-group">
                     <label class="form-label"><i class="fas fa-envelope"></i> Email Address</label>
@@ -59,13 +65,19 @@ $shifts = $pdo->query("SELECT * FROM shifts WHERE is_active = 1")->fetchAll();
 
         <!-- REGISTER TAB -->
         <div id="registerTab" class="tab-pane <?php echo $active_tab === 'register' ? 'active' : ''; ?>">
-            <h3 style="text-align: center; margin-bottom: 10px;">Join <?php echo htmlspecialchars(LIBRARY_SHORT_NAME); ?></h3>
+            <h3 style="text-align: center; margin-bottom: 6px;">Join <?php echo htmlspecialchars(LIBRARY_SHORT_NAME); ?></h3>
+            <div style="text-align: center; margin-bottom: 15px;">
+                <span class="badge badge-active" style="font-size: 0.82rem; padding: 4px 10px;">
+                    <i class="fas fa-building"></i> Tenant Code: <strong><?php echo htmlspecialchars($current_tenant_code); ?></strong>
+                </span>
+            </div>
             <p style="text-align: center; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px;">
                 Submit your registration request. Admin will review and allot your study desk seat.
             </p>
 
             <form action="api/auth.php" method="POST">
                 <input type="hidden" name="action" value="register">
+                <input type="hidden" name="tenant_code" value="<?php echo htmlspecialchars($current_tenant_code); ?>">
 
                 <div class="form-group">
                     <label class="form-label"><i class="fas fa-user"></i> Full Name *</label>

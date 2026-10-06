@@ -10,6 +10,10 @@ require_once __DIR__ . '/config/tenant_router.php';
 
 // Super Admin Authentication Guard
 if (empty($_SESSION['is_super_admin'])) {
+    if (!empty($_SESSION['user_id'])) {
+        http_response_code(403);
+        die("403 Forbidden: Tenant Admin or regular user cannot access Super Admin Portal.");
+    }
     header("Location: super_admin_login.php");
     exit();
 }
@@ -71,6 +75,19 @@ $stmt = $master_pdo->query("
     ORDER BY l.id ASC
 ");
 $libraries = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+foreach ($libraries as &$l) {
+    try {
+        $t_pdo = TenantDatabaseFactory::getTenantConnection($l['library_code']);
+        $t_admin = $t_pdo->query("SELECT name, email FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        $l['admin_name'] = $t_admin ? $t_admin['name'] : 'N/A';
+        $l['admin_email'] = $t_admin ? $t_admin['email'] : 'N/A';
+    } catch (Exception $e) {
+        $l['admin_name'] = 'N/A';
+        $l['admin_email'] = 'N/A';
+    }
+}
+unset($l);
 
 // Fetch Master Audit Logs
 $audit_stmt = $master_pdo->query("SELECT id, action, super_admin, library_code, result_status, metadata, created_at FROM super_admin_audit_logs ORDER BY id DESC LIMIT 50");
@@ -726,6 +743,8 @@ $audit_logs = $audit_stmt->fetchAll(PDO::FETCH_ASSOC);
                             <tr>
                                 <th>Library Code</th>
                                 <th>Library Name</th>
+                                <th>Admin Name</th>
+                                <th>Admin Email</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
@@ -735,10 +754,12 @@ $audit_logs = $audit_stmt->fetchAll(PDO::FETCH_ASSOC);
                             <tr>
                                 <td><strong><?php echo htmlspecialchars($l['library_code']); ?></strong></td>
                                 <td><?php echo htmlspecialchars($l['name']); ?></td>
+                                <td><?php echo htmlspecialchars($l['admin_name'] ?? 'N/A'); ?></td>
+                                <td><code><?php echo htmlspecialchars($l['admin_email'] ?? 'N/A'); ?></code></td>
                                 <td><span class="badge badge-active"><?php echo ucfirst($l['status']); ?></span></td>
                                 <td>
                                     <button class="btn btn-sm btn-primary" onclick="openCreateAdminModal('<?php echo $l['library_code']; ?>')"><i class="fas fa-user-plus"></i> Create Admin</button>
-                                    <button class="btn btn-sm btn-warning" onclick="openResetPassModal('<?php echo $l['library_code']; ?>', '<?php echo htmlspecialchars($l['email'] ?? '', ENT_QUOTES); ?>')"><i class="fas fa-key"></i> Reset Password</button>
+                                    <button class="btn btn-sm btn-warning" onclick="openResetPassModal('<?php echo $l['library_code']; ?>', '<?php echo htmlspecialchars(($l['admin_email'] !== 'N/A' ? $l['admin_email'] : ($l['email'] ?? '')), ENT_QUOTES); ?>')"><i class="fas fa-key"></i> Reset Password</button>
                                 </td>
                             </tr>
                             <?php endforeach; ?>

@@ -222,17 +222,18 @@ function resolve_tenant_context() {
     }
 
     // 1. Determine incoming requested library code
-    $header_code = $_SERVER['HTTP_X_LIBRARY_CODE'] ?? ($_SERVER['X_LIBRARY_CODE'] ?? null);
+    $header_code = $_SERVER['HTTP_X_LIBRARY_CODE'] ?? ($_SERVER['X_LIBRARY_CODE'] ?? ($_SERVER['HTTP_X_TENANT_CODE'] ?? ($_SERVER['X_TENANT_CODE'] ?? null)));
     $param_code = $_GET['code'] ?? ($_GET['library_code'] ?? ($_POST['library_code'] ?? ($_GET['tenant_code'] ?? ($_POST['tenant_code'] ?? null))));
     $requested_code = !empty($header_code) ? $header_code : (!empty($param_code) ? $param_code : null);
 
     // 2. Strict Authenticated Session Enforcement
-    // If user is already authenticated in session, the tenant is IMMUTABLE to session library_code!
-    if (!empty($_SESSION['user_id']) && !empty($_SESSION['library_code'])) {
-        $authenticated_code = $_SESSION['library_code'];
+    // If user is already authenticated in session, the tenant is IMMUTABLE to session library_code / tenant_code!
+    $sess_code = $_SESSION['library_code'] ?? ($_SESSION['tenant_code'] ?? null);
+    if (!empty($_SESSION['user_id']) && !empty($sess_code)) {
+        $authenticated_code = strtoupper(trim($sess_code));
         
         // If client manually attempts to pass a differing X-Library-Code header or parameter, REJECT immediately!
-        if (!empty($requested_code) && strtoupper(trim($requested_code)) !== strtoupper(trim($authenticated_code))) {
+        if (!empty($requested_code) && strtoupper(trim($requested_code)) !== $authenticated_code) {
             if (defined('IN_TEST_SUITE')) {
                 throw new Exception('CROSS-TENANT ACCESS FORBIDDEN: Authenticated session belongs to tenant ' . $authenticated_code . '. Header/Parameter spoofing detected.');
             }

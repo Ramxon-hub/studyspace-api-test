@@ -4,6 +4,9 @@
 require_once __DIR__ . '/../config/auth.php';
 
 $action = $_REQUEST['action'] ?? '';
+$tenant_ctx = resolve_tenant_context();
+$pdo = $tenant_ctx['pdo'];
+$current_tenant_code = $tenant_ctx['library_code'];
 
 if ($action === 'login') {
     $email = trim($_POST['email'] ?? '');
@@ -22,6 +25,10 @@ if ($action === 'login') {
         $_SESSION['user_id'] = $user['id'];
         $_SESSION['user_name'] = $user['name'];
         $_SESSION['user_role'] = $user['role'];
+        $_SESSION['library_code'] = $current_tenant_code;
+        $_SESSION['tenant_code'] = $current_tenant_code;
+        $_SESSION['auth_time'] = time();
+        $_SESSION['session_id'] = session_id();
 
         if ($user['role'] === 'admin') {
             header("Location: ../admin_dashboard.php");
@@ -32,7 +39,8 @@ if ($action === 'login') {
         }
         exit();
     } else {
-        header("Location: ../login.php?error=" . urlencode("Invalid email or password."));
+        $redir_code = !empty($current_tenant_code) ? ("?code=" . urlencode($current_tenant_code) . "&") : "?";
+        header("Location: ../login.php{$redir_code}error=" . urlencode("Invalid email or password for tenant " . $current_tenant_code));
         exit();
     }
 }

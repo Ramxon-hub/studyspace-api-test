@@ -24,6 +24,10 @@ if (!empty($input)) {
 
 $action = $_GET['action'] ?? ($_POST['action'] ?? '');
 
+$tenant_ctx = resolve_tenant_context();
+$pdo = $tenant_ctx['pdo'];
+$current_tenant_code = $tenant_ctx['library_code'];
+
 try {
     if ($action === 'login') {
         $email = trim($_POST['email'] ?? '');
@@ -31,7 +35,7 @@ try {
 
         if (empty($email) || empty($password)) {
             echo json_encode(['success' => false, 'message' => 'Please fill in both email and password.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("SELECT * FROM users WHERE email = ?");
@@ -78,6 +82,9 @@ try {
             $_SESSION['user_name'] = $user['name'];
             $_SESSION['user_role'] = $user['role'];
             $_SESSION['library_code'] = $current_tenant_code;
+            $_SESSION['tenant_code'] = $current_tenant_code;
+            $_SESSION['auth_time'] = time();
+            $_SESSION['session_id'] = session_id();
             session_write_close();
 
             // Clean up password hash before sending
@@ -103,7 +110,7 @@ try {
         } else {
             echo json_encode(['success' => false, 'message' => 'Invalid email or password.']);
         }
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'register') {
         $name = trim($_POST['name'] ?? '');

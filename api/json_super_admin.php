@@ -81,8 +81,13 @@ $has_valid_key = (!empty($admin_key) && $admin_key === $expected_key);
 
 // Strict Security Enforcement: Reject non-Super Admin users (Normal Admins, Students, Parents)
 if (!$is_super_admin_session && !$has_valid_key) {
-    http_response_code(401);
-    echo json_encode(['success' => false, 'error' => 'Unauthorized Super Admin access. Super Admin credentials required.']);
+    if (!empty($_SESSION['user_id'])) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => '403 Forbidden: Tenant Admin or regular user cannot access Super Admin Portal API.']);
+    } else {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'Unauthorized Super Admin access. Super Admin credentials required.']);
+    }
     if (defined('IN_TEST_SUITE')) return; else exit();
 }
 
