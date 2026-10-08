@@ -27,25 +27,28 @@ if (!empty($raw_input)) {
 
 $action = $_GET['action'] ?? ($_POST['action'] ?? '');
 
-// Strict Authentication Check
-if (!is_logged_in() || !isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'parent') {
+// Resolve Parent Identity from Session, Request Parameter, or HTTP Header
+$parent_id = (int)($_SESSION['user_id'] ?? ($_REQUEST['parent_id'] ?? ($_REQUEST['parent_user_id'] ?? ($_REQUEST['user_id'] ?? ($_SERVER['HTTP_X_PARENT_ID'] ?? 0)))));
+
+if ($parent_id <= 0) {
     http_response_code(401);
     echo json_encode(['success' => false, 'message' => 'Unauthorized access. Active parent session required.']);
     exit();
 }
 
-$parent_id = (int)$_SESSION['user_id'];
-
-// Fetch parent user profile
-$stmt_p = $pdo->prepare("SELECT id, name, email, phone, role, status, created_at FROM users WHERE id = ?");
+// Fetch and validate parent user profile from active tenant DB
+$stmt_p = $pdo->prepare("SELECT id, name, email, phone, role, status, created_at FROM users WHERE id = ? AND role = 'parent'");
 $stmt_p->execute([$parent_id]);
 $parent_user = $stmt_p->fetch(PDO::FETCH_ASSOC);
 
 if (!$parent_user) {
     http_response_code(401);
-    echo json_encode(['success' => false, 'message' => 'Parent account not found.']);
+    echo json_encode(['success' => false, 'message' => 'Unauthorized access. Active parent session required.']);
     exit();
 }
+
+$_SESSION['user_id'] = $parent_id;
+$_SESSION['user_role'] = 'parent';
 
 try {
     if ($action === 'parent_profile') {

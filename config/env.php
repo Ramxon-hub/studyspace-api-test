@@ -54,10 +54,10 @@ if (!defined('DB_PATH')) {
     if ($env_db_path) {
         define('DB_PATH', $env_db_path);
     } elseif (defined('APP_ENV') && APP_ENV === 'development') {
-        define('DB_PATH', __DIR__ . '/../library.db');
+        define('DB_PATH', __DIR__ . '/../data/tenant_lib001.sqlite');
     } else {
         // Authoritative Production Database Path on Render Persistent Disk
-        define('DB_PATH', '/var/www/html/data/library.db');
+        define('DB_PATH', __DIR__ . '/../data/tenant_lib001.sqlite');
     }
 }
 

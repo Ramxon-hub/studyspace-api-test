@@ -34,7 +34,8 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
       _errorMessage = '';
     });
 
-    final res = await ApiService.getParentProfile();
+    final parentId = widget.userData['id'] is int ? widget.userData['id'] as int : int.tryParse(widget.userData['id']?.toString() ?? '0');
+    final res = await ApiService.getParentProfile(parentId: parentId);
     if (res['success'] == true) {
       final students = res['linked_students'] as List<dynamic>? ?? [];
       setState(() {
@@ -64,9 +65,10 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
       _isLoading = true;
     });
 
-    final summaryRes = await ApiService.getParentStudentFullSummary(studentId);
-    final unreadRes = await ApiService.getParentUnreadCounts(studentId: studentId);
-    final compRes = await ApiService.getParentComplaints(studentId);
+    final parentId = widget.userData['id'] is int ? widget.userData['id'] as int : int.tryParse(widget.userData['id']?.toString() ?? '0');
+    final summaryRes = await ApiService.getParentStudentFullSummary(studentId, parentId: parentId);
+    final unreadRes = await ApiService.getParentUnreadCounts(studentId: studentId, parentId: parentId);
+    final compRes = await ApiService.getParentComplaints(studentId, parentId: parentId);
 
     if (summaryRes['success'] == true) {
       setState(() {
@@ -92,11 +94,13 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
 
   void _openParentChat() {
     if (_selectedStudent == null) return;
+    final parentId = widget.userData['id'] is int ? widget.userData['id'] as int : int.tryParse(widget.userData['id']?.toString() ?? '0');
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ParentChatScreen(
           studentId: _selectedStudent!['id'],
           studentName: _selectedStudent!['name'] ?? 'Child',
+          parentId: parentId,
         ),
       ),
     ).then((_) {

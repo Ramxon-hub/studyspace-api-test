@@ -254,12 +254,14 @@ function resolve_tenant_context() {
 
     try {
         $pdo = TenantDatabaseFactory::getTenantConnection($target_code);
+        $db_path = TenantDatabaseFactory::resolveTenantDbPath($target_code);
         if (!defined('CURRENT_TENANT_CODE')) {
             define('CURRENT_TENANT_CODE', $target_code);
         }
         return [
             'library_code' => $target_code,
-            'pdo' => $pdo
+            'pdo' => $pdo,
+            'db_path' => $db_path
         ];
     } catch (Exception $e) {
         if (defined('IN_TEST_SUITE')) {

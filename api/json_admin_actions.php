@@ -708,13 +708,16 @@ try {
         exit();
 
     } elseif ($action === 'backup_db') {
-        $db_file = DB_PATH;
+        $tenant_ctx = resolve_tenant_context();
+        $db_file = $tenant_ctx['db_path'];
+        $current_code = strtolower($tenant_ctx['library_code']);
+
         if (!file_exists($db_file)) {
-            die("Database file not found at " . $db_file);
+            die("Database file not found for tenant " . strtoupper($current_code));
         }
 
         $timestamp = date('Ymd_His');
-        $filename = "library_backup_" . $timestamp . ".db";
+        $filename = "tenant_" . $current_code . "_backup_" . $timestamp . ".sqlite";
         $temp_backup = sys_get_temp_dir() . '/' . $filename;
         if (file_exists($temp_backup)) @unlink($temp_backup);
 
@@ -737,9 +740,12 @@ try {
         exit();
 
     } elseif ($action === 'get_database_backup_info') {
-        $db_file = DB_PATH;
+        $tenant_ctx = resolve_tenant_context();
+        $db_file = $tenant_ctx['db_path'];
+        $current_code = strtolower($tenant_ctx['library_code']);
+
         if (!file_exists($db_file)) {
-            echo json_encode(['success' => false, 'message' => 'Database file not found at ' . $db_file]);
+            echo json_encode(['success' => false, 'message' => 'Database file not found for tenant ' . strtoupper($current_code)]);
             exit();
         }
 
@@ -760,11 +766,11 @@ try {
 
         echo json_encode([
             'success' => true,
-            'filename' => "library_backup_" . $timestamp . ".db",
+            'filename' => "tenant_" . $current_code . "_backup_" . $timestamp . ".sqlite",
             'db_size_bytes' => filesize($db_file),
             'db_size_formatted' => round(filesize($db_file) / 1024, 2) . " KB",
             'table_counts' => $counts,
-            'backup_url' => "$base_url/api/json_admin_actions.php?action=backup_db"
+            'backup_url' => "$base_url/api/json_admin_actions.php?action=backup_db&code=" . strtoupper($current_code)
         ]);
         exit();
 

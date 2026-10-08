@@ -173,7 +173,7 @@ class _DbBackupScreenState extends State<DbBackupScreen> {
                                           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                                         ),
                                         Text(
-                                          _backupData?['filename'] ?? 'library.db',
+                                          _backupData?['filename'] ?? 'tenant_database.sqlite',
                                           style: TextStyle(
                                             fontSize: 12,
                                             color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
@@ -301,7 +301,7 @@ class _DbBackupScreenState extends State<DbBackupScreen> {
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      'All student seat allotments, fee receipts, and attendance logs are saved in library.db. Downloading a backup ensures you can restore your data anytime.',
+                                      'All student seat allotments, fee receipts, and attendance logs are saved in the active tenant database. Downloading a backup ensures you can restore your data anytime.',
                                       style: TextStyle(
                                         fontSize: 11,
                                         color: isDark ? const Color(0xFFCBD5E1) : Colors.black87,

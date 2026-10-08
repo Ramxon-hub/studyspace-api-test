@@ -7,11 +7,13 @@ import '../services/api_service.dart';
 class ParentChatScreen extends StatefulWidget {
   final int studentId;
   final String studentName;
+  final int? parentId;
 
   const ParentChatScreen({
     Key? key,
     required this.studentId,
     required this.studentName,
+    this.parentId,
   }) : super(key: key);
 
   @override
@@ -49,7 +51,7 @@ class _ParentChatScreenState extends State<ParentChatScreen> {
       setState(() => _isLoading = true);
     }
 
-    final res = await ApiService.getParentChatMessages(widget.studentId);
+    final res = await ApiService.getParentChatMessages(widget.studentId, parentId: widget.parentId);
     if (mounted) {
       if (res['success'] == true) {
         final newMsgs = res['messages'] as List<dynamic>? ?? [];
@@ -90,7 +92,7 @@ class _ParentChatScreenState extends State<ParentChatScreen> {
       _msgController.clear();
     }
 
-    final res = await ApiService.sendParentChatMessage(widget.studentId, text);
+    final res = await ApiService.sendParentChatMessage(widget.studentId, text, parentId: widget.parentId);
     if (mounted) {
       setState(() => _isSending = false);
       if (res['success'] == true) {

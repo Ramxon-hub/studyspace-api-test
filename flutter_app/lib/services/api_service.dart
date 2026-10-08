@@ -809,10 +809,12 @@ class ApiService {
   // ================= PARENT PORTAL API METHODS ================= //
 
   // Get Parent Profile & Linked Students
-  static Future<Map<String, dynamic>> getParentProfile() async {
+  static Future<Map<String, dynamic>> getParentProfile({int? parentId}) async {
     try {
+      final pParam = parentId != null && parentId > 0 ? '&parent_id=$parentId' : '';
       final response = await http.get(
-        Uri.parse('${ApiConfig.jsonParent}?action=parent_profile'),
+        Uri.parse('${ApiConfig.jsonParent}?action=parent_profile$pParam'),
+        headers: parentId != null ? {'X-Parent-Id': parentId.toString(), ...defaultHeaders} : defaultHeaders,
       ).timeout(_timeout);
       return jsonDecode(response.body);
     } catch (e) {
@@ -821,10 +823,12 @@ class ApiService {
   }
 
   // Get Linked Students for Parent
-  static Future<Map<String, dynamic>> getParentLinkedStudents() async {
+  static Future<Map<String, dynamic>> getParentLinkedStudents({int? parentId}) async {
     try {
+      final pParam = parentId != null && parentId > 0 ? '&parent_id=$parentId' : '';
       final response = await http.get(
-        Uri.parse('${ApiConfig.jsonParent}?action=linked_students'),
+        Uri.parse('${ApiConfig.jsonParent}?action=linked_students$pParam'),
+        headers: parentId != null ? {'X-Parent-Id': parentId.toString(), ...defaultHeaders} : defaultHeaders,
       ).timeout(_timeout);
       return jsonDecode(response.body);
     } catch (e) {
@@ -833,10 +837,12 @@ class ApiService {
   }
 
   // Get Full Student Summary for Parent Portal Dashboard
-  static Future<Map<String, dynamic>> getParentStudentFullSummary(int studentId) async {
+  static Future<Map<String, dynamic>> getParentStudentFullSummary(int studentId, {int? parentId}) async {
     try {
+      final pParam = parentId != null && parentId > 0 ? '&parent_id=$parentId' : '';
       final response = await http.get(
-        Uri.parse('${ApiConfig.jsonParent}?action=student_full_summary&student_id=$studentId'),
+        Uri.parse('${ApiConfig.jsonParent}?action=student_full_summary&student_id=$studentId$pParam'),
+        headers: parentId != null ? {'X-Parent-Id': parentId.toString(), ...defaultHeaders} : defaultHeaders,
       ).timeout(_timeout);
       return jsonDecode(response.body);
     } catch (e) {
@@ -845,11 +851,13 @@ class ApiService {
   }
 
   // Get Attendance History for Linked Student
-  static Future<Map<String, dynamic>> getParentStudentAttendance(int studentId, {String? month}) async {
+  static Future<Map<String, dynamic>> getParentStudentAttendance(int studentId, {int? parentId, String? month}) async {
     try {
       final monthParam = month != null ? '&month=$month' : '';
+      final pParam = parentId != null && parentId > 0 ? '&parent_id=$parentId' : '';
       final response = await http.get(
-        Uri.parse('${ApiConfig.jsonParent}?action=attendance_history&student_id=$studentId$monthParam'),
+        Uri.parse('${ApiConfig.jsonParent}?action=attendance_history&student_id=$studentId$monthParam$pParam'),
+        headers: parentId != null ? {'X-Parent-Id': parentId.toString(), ...defaultHeaders} : defaultHeaders,
       ).timeout(_timeout);
       return jsonDecode(response.body);
     } catch (e) {
@@ -858,10 +866,12 @@ class ApiService {
   }
 
   // Get 12-Month Fee Billing Matrix for Linked Student
-  static Future<Map<String, dynamic>> getParentStudent12MonthFees(int studentId) async {
+  static Future<Map<String, dynamic>> getParentStudent12MonthFees(int studentId, {int? parentId}) async {
     try {
+      final pParam = parentId != null && parentId > 0 ? '&parent_id=$parentId' : '';
       final response = await http.get(
-        Uri.parse('${ApiConfig.jsonParent}?action=fee_12_month&student_id=$studentId'),
+        Uri.parse('${ApiConfig.jsonParent}?action=fee_12_month&student_id=$studentId$pParam'),
+        headers: parentId != null ? {'X-Parent-Id': parentId.toString(), ...defaultHeaders} : defaultHeaders,
       ).timeout(_timeout);
       return jsonDecode(response.body);
     } catch (e) {
@@ -870,10 +880,12 @@ class ApiService {
   }
 
   // Get Parent Chat Messages for Linked Student
-  static Future<Map<String, dynamic>> getParentChatMessages(int studentId) async {
+  static Future<Map<String, dynamic>> getParentChatMessages(int studentId, {int? parentId}) async {
     try {
+      final pParam = parentId != null && parentId > 0 ? '&parent_id=$parentId' : '';
       final response = await http.get(
-        Uri.parse('${ApiConfig.jsonParent}?action=get_chat_messages&student_id=$studentId'),
+        Uri.parse('${ApiConfig.jsonParent}?action=get_chat_messages&student_id=$studentId$pParam'),
+        headers: parentId != null ? {'X-Parent-Id': parentId.toString(), ...defaultHeaders} : defaultHeaders,
       ).timeout(_timeout);
       return jsonDecode(response.body);
     } catch (e) {
@@ -882,15 +894,20 @@ class ApiService {
   }
 
   // Send Parent Chat Message to Admin
-  static Future<Map<String, dynamic>> sendParentChatMessage(int studentId, String message) async {
+  static Future<Map<String, dynamic>> sendParentChatMessage(int studentId, String message, {int? parentId}) async {
     try {
+      final body = {
+        'action': 'send_chat_message',
+        'student_id': studentId.toString(),
+        'message': message,
+      };
+      if (parentId != null && parentId > 0) {
+        body['parent_id'] = parentId.toString();
+      }
       final response = await http.post(
         Uri.parse(ApiConfig.jsonParent),
-        body: {
-          'action': 'send_chat_message',
-          'student_id': studentId.toString(),
-          'message': message,
-        },
+        headers: parentId != null ? {'X-Parent-Id': parentId.toString(), ...defaultHeaders} : defaultHeaders,
+        body: body,
       ).timeout(_timeout);
       return jsonDecode(response.body);
     } catch (e) {
@@ -899,11 +916,13 @@ class ApiService {
   }
 
   // Get Parent Unread Badges Count
-  static Future<Map<String, dynamic>> getParentUnreadCounts({int? studentId}) async {
+  static Future<Map<String, dynamic>> getParentUnreadCounts({int? studentId, int? parentId}) async {
     try {
       final sidParam = studentId != null && studentId > 0 ? '&student_id=$studentId' : '';
+      final pParam = parentId != null && parentId > 0 ? '&parent_id=$parentId' : '';
       final response = await http.get(
-        Uri.parse('${ApiConfig.jsonParent}?action=get_unread_counts$sidParam'),
+        Uri.parse('${ApiConfig.jsonParent}?action=get_unread_counts$sidParam$pParam'),
+        headers: parentId != null ? {'X-Parent-Id': parentId.toString(), ...defaultHeaders} : defaultHeaders,
       ).timeout(_timeout);
       return jsonDecode(response.body);
     } catch (e) {
@@ -912,10 +931,12 @@ class ApiService {
   }
 
   // Get Complaints for Linked Student
-  static Future<Map<String, dynamic>> getParentComplaints(int studentId) async {
+  static Future<Map<String, dynamic>> getParentComplaints(int studentId, {int? parentId}) async {
     try {
+      final pParam = parentId != null && parentId > 0 ? '&parent_id=$parentId' : '';
       final response = await http.get(
-        Uri.parse('${ApiConfig.jsonParent}?action=complaints&student_id=$studentId'),
+        Uri.parse('${ApiConfig.jsonParent}?action=complaints&student_id=$studentId$pParam'),
+        headers: parentId != null ? {'X-Parent-Id': parentId.toString(), ...defaultHeaders} : defaultHeaders,
       ).timeout(_timeout);
       return jsonDecode(response.body);
     } catch (e) {
@@ -924,16 +945,21 @@ class ApiService {
   }
 
   // Create Complaint / Request for Linked Student
-  static Future<Map<String, dynamic>> createParentComplaint(int studentId, {String? subject, required String message}) async {
+  static Future<Map<String, dynamic>> createParentComplaint(int studentId, {String? subject, required String message, int? parentId}) async {
     try {
+      final body = {
+        'action': 'create_complaint',
+        'student_id': studentId.toString(),
+        'subject': subject ?? 'Parent Query / Request',
+        'description': message,
+      };
+      if (parentId != null && parentId > 0) {
+        body['parent_id'] = parentId.toString();
+      }
       final response = await http.post(
         Uri.parse(ApiConfig.jsonParent),
-        body: {
-          'action': 'create_complaint',
-          'student_id': studentId.toString(),
-          'subject': subject ?? 'Parent Query / Request',
-          'description': message,
-        },
+        headers: parentId != null ? {'X-Parent-Id': parentId.toString(), ...defaultHeaders} : defaultHeaders,
+        body: body,
       ).timeout(_timeout);
       return jsonDecode(response.body);
     } catch (e) {
