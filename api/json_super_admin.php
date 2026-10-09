@@ -1,6 +1,14 @@
 <?php
 // api/json_super_admin.php - Comprehensive Super Admin Control Panel API (Phase 5 SaaS Operations)
 
+if (!function_exists('safe_http_response_code')) {
+    function safe_http_response_code($code) {
+        if (!headers_sent()) {
+            @http_response_code($code);
+        }
+    }
+}
+
 if (!headers_sent()) {
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
@@ -9,7 +17,7 @@ if (!headers_sent()) {
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
-    if (!headers_sent()) http_response_code(200);
+    safe_http_response_code(200);
     if (defined('IN_TEST_SUITE')) return; else exit();
 }
 
@@ -30,7 +38,7 @@ if ($action === 'login') {
     $password = trim($_POST['password'] ?? '');
 
     if (empty($username) || empty($password)) {
-        http_response_code(400);
+        safe_http_response_code(400);
         echo json_encode(['success' => false, 'error' => 'Username and password are required.']);
         if (defined('IN_TEST_SUITE')) return; else exit();
     }
@@ -60,7 +68,7 @@ if ($action === 'login') {
         if (defined('IN_TEST_SUITE')) return; else exit();
     } else {
         log_super_admin_action($master_pdo, 'super_admin_login_failed', $username, null, 'FAILED');
-        http_response_code(401);
+        safe_http_response_code(401);
         echo json_encode(['success' => false, 'error' => 'Invalid Super Admin username or password.']);
         if (defined('IN_TEST_SUITE')) return; else exit();
     }
@@ -82,10 +90,10 @@ $has_valid_key = (!empty($admin_key) && $admin_key === $expected_key);
 // Strict Security Enforcement: Reject non-Super Admin users (Normal Admins, Students, Parents)
 if (!$is_super_admin_session && !$has_valid_key) {
     if (!empty($_SESSION['user_id'])) {
-        http_response_code(403);
+        safe_http_response_code(403);
         echo json_encode(['success' => false, 'error' => '403 Forbidden: Tenant Admin or regular user cannot access Super Admin Portal API.']);
     } else {
-        http_response_code(401);
+        safe_http_response_code(401);
         echo json_encode(['success' => false, 'error' => 'Unauthorized Super Admin access. Super Admin credentials required.']);
     }
     if (defined('IN_TEST_SUITE')) return; else exit();
@@ -131,6 +139,15 @@ try {
         $verified_payments = (int)$master_pdo->query("SELECT COUNT(*) FROM manual_payments WHERE status = 'VERIFIED'")->fetchColumn();
         $total_collections = (float)$master_pdo->query("SELECT COALESCE(SUM(amount), 0.00) FROM manual_payments WHERE status = 'VERIFIED'")->fetchColumn();
 
+        $total_tenant_admins = 0;
+        $all_lib_codes = $master_pdo->query("SELECT library_code FROM libraries")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($all_lib_codes as $lc) {
+            try {
+                $tpdo = TenantDatabaseFactory::getTenantConnection($lc);
+                $total_tenant_admins += (int)$tpdo->query("SELECT COUNT(*) FROM users WHERE role = 'admin' AND (is_deleted IS NULL OR is_deleted = 0)")->fetchColumn();
+            } catch (Exception $e) {}
+        }
+
         $recent_libs = $master_pdo->query("SELECT library_code, name, status, created_at FROM libraries ORDER BY id DESC LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
         $recent_audit = $master_pdo->query("SELECT action, super_admin, library_code, result_status, created_at FROM super_admin_audit_logs ORDER BY id DESC LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
 
@@ -144,6 +161,7 @@ try {
                 'expired_libraries' => $expired_libs,
                 'active_subscriptions' => $active_subs,
                 'expiring_soon' => $expiring_soon,
+                'total_tenant_admins' => $total_tenant_admins,
                 'total_tenant_databases' => $total_tenant_dbs,
                 'provisioning_failures' => $provisioning_failures,
                 'pending_manual_payments' => $pending_payments,
@@ -276,7 +294,7 @@ try {
         $chk = $master_pdo->prepare("SELECT COUNT(*) FROM libraries WHERE library_code = ?");
         $chk->execute([$code]);
         if ((int)$chk->fetchColumn() > 0) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Library code already registered: ' . $code]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -498,7 +516,7 @@ try {
 
             log_super_admin_action($master_pdo, 'provision_failed', $super_admin_user, $code, 'FAILED', ['error' => $err]);
 
-            http_response_code(500);
+            safe_http_response_code(500);
             echo json_encode(['success' => false, 'error' => "Provisioning failed for $code: $err"]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -566,6 +584,14 @@ try {
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
+        $stmt_lib_chk = $master_pdo->prepare("SELECT id, status FROM libraries WHERE library_code = ?");
+        $stmt_lib_chk->execute([$code]);
+        if (!$stmt_lib_chk->fetch()) {
+            safe_http_response_code(404);
+            echo json_encode(['success' => false, 'error' => "Invalid library code: Library '$code' is not registered in Master DB."]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
         $tenant_pdo = TenantDatabaseFactory::getTenantConnection($code);
 
         // Check if admin/user already exists by email
@@ -612,6 +638,75 @@ try {
         log_super_admin_action($master_pdo, 'password_reset', $super_admin_user, $code, 'SUCCESS', ['email' => $email]);
 
         echo json_encode(['success' => true, 'message' => "Password for tenant admin '$email' reset successfully."]);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+
+    } elseif ($action === 'list_tenant_admins') {
+        $filter_code = strtoupper(trim($_GET['library_code'] ?? ($_POST['library_code'] ?? '')));
+        $search = trim($_GET['search'] ?? ($_POST['search'] ?? ''));
+
+        $libs_query = "SELECT library_code, name, status FROM libraries WHERE 1=1";
+        $params = [];
+        if (!empty($filter_code)) {
+            $libs_query .= " AND library_code = ?";
+            $params[] = $filter_code;
+        }
+        $stmt_libs = $master_pdo->prepare($libs_query);
+        $stmt_libs->execute($params);
+        $libs_list = $stmt_libs->fetchAll(PDO::FETCH_ASSOC);
+
+        $all_admins = [];
+        foreach ($libs_list as $l) {
+            $lcode = $l['library_code'];
+            $lname = $l['name'];
+            try {
+                $tpdo = TenantDatabaseFactory::getTenantConnection($lcode);
+                $adm_stmt = $tpdo->prepare("SELECT id, name, email, phone, role, status, created_at FROM users WHERE role = 'admin' AND (is_deleted IS NULL OR is_deleted = 0) ORDER BY id ASC");
+                $adm_stmt->execute();
+                $adms = $adm_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                foreach ($adms as $a) {
+                    if (!empty($search)) {
+                        $s_lower = strtolower($search);
+                        if (!str_contains(strtolower($a['name'] ?? ''), $s_lower) &&
+                            !str_contains(strtolower($a['email'] ?? ''), $s_lower) &&
+                            !str_contains(strtolower($lcode), $s_lower)) {
+                            continue;
+                        }
+                    }
+                    $a['library_code'] = $lcode;
+                    $a['library_name'] = $lname;
+                    $all_admins[] = $a;
+                }
+            } catch (Exception $e) {}
+        }
+
+        echo json_encode(['success' => true, 'admins' => $all_admins]);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+
+    } elseif ($action === 'toggle_admin_status') {
+        $code = strtoupper(trim($_POST['library_code'] ?? ''));
+        $user_id = (int)($_POST['admin_id'] ?? ($_POST['user_id'] ?? 0));
+        $email = trim($_POST['email'] ?? '');
+        $new_status = strtolower(trim($_POST['status'] ?? 'approved'));
+
+        if (empty($code) || (empty($user_id) && empty($email))) {
+            echo json_encode(['success' => false, 'error' => 'Library code and admin user_id or email are required.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $tenant_pdo = TenantDatabaseFactory::getTenantConnection($code);
+
+        if ($user_id > 0) {
+            $stmt = $tenant_pdo->prepare("UPDATE users SET status = ? WHERE id = ? AND role = 'admin'");
+            $stmt->execute([$new_status, $user_id]);
+        } else {
+            $stmt = $tenant_pdo->prepare("UPDATE users SET status = ? WHERE email = ? AND role = 'admin'");
+            $stmt->execute([$new_status, $email]);
+        }
+
+        log_super_admin_action($master_pdo, 'admin_status_toggled', $super_admin_user, $code, 'SUCCESS', ['admin' => $user_id ?: $email, 'new_status' => $new_status]);
+
+        echo json_encode(['success' => true, 'message' => "Tenant admin status updated to '$new_status'."]);
         if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'list_plans') {
@@ -792,7 +887,7 @@ try {
         $proof_reference = trim($_POST['proof_reference'] ?? '');
 
         if (empty($invoice_ref) || empty($code)) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Invoice ID and library code are required.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -808,44 +903,44 @@ try {
         $invoice = $stmtInv->fetch(PDO::FETCH_ASSOC);
 
         if (!$invoice) {
-            http_response_code(404);
+            safe_http_response_code(404);
             echo json_encode(['success' => false, 'error' => "Invoice '$invoice_ref' not found."]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         if ($invoice['library_code'] !== $code) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Library code mismatch for specified invoice.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         if ($invoice['status'] === 'PAID') {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Invoice is already paid.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         if ($invoice['status'] === 'CANCELLED') {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Cannot pay a cancelled invoice.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $valid_methods = ['manual_cash', 'manual_upi', 'manual_bank_transfer', 'manual_other'];
         if (!in_array($payment_method, $valid_methods)) {
-            http_response_code(422);
+            safe_http_response_code(422);
             echo json_encode(['success' => false, 'error' => 'Invalid payment method. Must be one of: ' . implode(', ', $valid_methods)]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         if (abs($amount - (float)$invoice['amount']) > 0.01) {
-            http_response_code(422);
+            safe_http_response_code(422);
             echo json_encode(['success' => false, 'error' => "Payment amount (" . number_format($amount, 2) . ") does not match invoice amount (" . number_format($invoice['amount'], 2) . ")."]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         if (($payment_method === 'manual_upi' || $payment_method === 'manual_bank_transfer') && empty($payment_reference)) {
-            http_response_code(422);
+            safe_http_response_code(422);
             echo json_encode(['success' => false, 'error' => 'Payment reference (UTR/Transaction ID) is required for UPI and Bank Transfer payments.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -855,7 +950,7 @@ try {
             $stmtChkRef = $master_pdo->prepare("SELECT COUNT(*) FROM manual_payments WHERE payment_reference = ? AND status != 'REJECTED' AND status != 'VOID'");
             $stmtChkRef->execute([$payment_reference]);
             if ((int)$stmtChkRef->fetchColumn() > 0) {
-                http_response_code(409);
+                safe_http_response_code(409);
                 echo json_encode(['success' => false, 'error' => "Duplicate payment reference: UTR/Ref '$payment_reference' has already been recorded."]);
                 if (defined('IN_TEST_SUITE')) return; else exit();
             }
@@ -865,7 +960,7 @@ try {
         $stmtChkPending = $master_pdo->prepare("SELECT COUNT(*) FROM manual_payments WHERE invoice_id = ? AND status = 'PENDING'");
         $stmtChkPending->execute([$invoice['id']]);
         if ((int)$stmtChkPending->fetchColumn() > 0) {
-            http_response_code(409);
+            safe_http_response_code(409);
             echo json_encode(['success' => false, 'error' => 'A pending payment record already exists for this invoice.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -901,7 +996,7 @@ try {
         $payment_ref = trim($_POST['payment_id'] ?? ($_GET['payment_id'] ?? ''));
 
         if (empty($payment_ref)) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Payment ID is required.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -916,7 +1011,7 @@ try {
         $payment = $stmtP->fetch(PDO::FETCH_ASSOC);
 
         if (!$payment) {
-            http_response_code(404);
+            safe_http_response_code(404);
             echo json_encode(['success' => false, 'error' => "Payment record '$payment_ref' not found."]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -939,7 +1034,7 @@ try {
         }
 
         if ($payment['status'] === 'REJECTED' || $payment['status'] === 'VOID') {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => "Cannot verify a payment with status '{$payment['status']}'."]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -950,7 +1045,7 @@ try {
         $invoice = $stmtInv->fetch(PDO::FETCH_ASSOC);
 
         if (!$invoice) {
-            http_response_code(404);
+            safe_http_response_code(404);
             echo json_encode(['success' => false, 'error' => "Associated invoice not found for payment."]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1047,7 +1142,7 @@ try {
 
         } catch (Exception $ex) {
             $master_pdo->rollBack();
-            http_response_code(500);
+            safe_http_response_code(500);
             echo json_encode(['success' => false, 'error' => 'Failed to verify payment: ' . $ex->getMessage()]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1057,13 +1152,13 @@ try {
         $rejection_reason = trim($_POST['rejection_reason'] ?? ($_POST['reason'] ?? ''));
 
         if (empty($payment_ref)) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Payment ID is required.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         if (empty($rejection_reason)) {
-            http_response_code(422);
+            safe_http_response_code(422);
             echo json_encode(['success' => false, 'error' => 'Rejection reason is required.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1078,13 +1173,13 @@ try {
         $payment = $stmtP->fetch(PDO::FETCH_ASSOC);
 
         if (!$payment) {
-            http_response_code(404);
+            safe_http_response_code(404);
             echo json_encode(['success' => false, 'error' => "Payment record '$payment_ref' not found."]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         if ($payment['status'] === 'VERIFIED') {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Cannot reject an already verified payment.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1148,7 +1243,7 @@ try {
         $reason = trim($_POST['reason'] ?? 'Cancelled by Super Admin');
 
         if (empty($invoice_ref)) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Invoice ID is required.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1163,13 +1258,13 @@ try {
         $invoice = $stmtInv->fetch(PDO::FETCH_ASSOC);
 
         if (!$invoice) {
-            http_response_code(404);
+            safe_http_response_code(404);
             echo json_encode(['success' => false, 'error' => "Invoice '$invoice_ref' not found."]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         if ($invoice['status'] === 'PAID') {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Cannot cancel an already paid invoice.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1219,7 +1314,7 @@ try {
         $admin_note = trim($_POST['admin_note'] ?? '');
 
         if (empty($req_id)) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Request ID is required.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1229,7 +1324,7 @@ try {
         $req = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$req) {
-            http_response_code(404);
+            safe_http_response_code(404);
             echo json_encode(['success' => false, 'error' => "Renewal request '$req_id' not found."]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1252,7 +1347,7 @@ try {
     } elseif ($action === 'get_customer_profile') {
         $code = strtoupper(trim($_GET['library_code'] ?? ($_POST['library_code'] ?? '')));
         if (empty($code)) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Library code is required.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1271,7 +1366,7 @@ try {
         $lib = $stmtLib->fetch(PDO::FETCH_ASSOC);
 
         if (!$lib) {
-            http_response_code(404);
+            safe_http_response_code(404);
             echo json_encode(['success' => false, 'error' => "Library not found: $code"]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1374,7 +1469,7 @@ try {
             $stmt_chk = $master_pdo->prepare("SELECT id FROM libraries WHERE library_code = ?");
             $stmt_chk->execute([$code]);
             if (!$stmt_chk->fetch()) {
-                http_response_code(404);
+                safe_http_response_code(404);
                 echo json_encode(['success' => false, 'error' => "Library code not registered: $code"]);
                 if (defined('IN_TEST_SUITE')) return; else exit();
             }
@@ -1383,7 +1478,7 @@ try {
         }
 
         if (!file_exists($src_file)) {
-            http_response_code(404);
+            safe_http_response_code(404);
             echo json_encode(['success' => false, 'error' => "Source database file does not exist: $src_file"]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1396,7 +1491,7 @@ try {
 
         $dest_file = $target_dir . '/' . $filename;
         if (!copy($src_file, $dest_file)) {
-            http_response_code(500);
+            safe_http_response_code(500);
             echo json_encode(['success' => false, 'error' => "Failed to copy database file for backup."]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1412,14 +1507,14 @@ try {
             $chk_res = $b_pdo->query("PRAGMA integrity_check")->fetchColumn();
             if ($chk_res !== 'ok') {
                 @unlink($dest_file);
-                http_response_code(500);
+                safe_http_response_code(500);
                 echo json_encode(['success' => false, 'error' => "Backup failed integrity check: $chk_res"]);
                 if (defined('IN_TEST_SUITE')) return; else exit();
             }
             $b_pdo = null;
         } catch (Exception $e) {
             @unlink($dest_file);
-            http_response_code(500);
+            safe_http_response_code(500);
             echo json_encode(['success' => false, 'error' => "Backup integrity check failed: " . $e->getMessage()]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1457,7 +1552,7 @@ try {
     } elseif ($action === 'download_backup') {
         $backup_id = trim($_GET['backup_id'] ?? ($_POST['backup_id'] ?? ''));
         if (empty($backup_id)) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Backup ID is required.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1467,7 +1562,7 @@ try {
         $bk = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$bk || !file_exists($bk['file_path'])) {
-            http_response_code(404);
+            safe_http_response_code(404);
             echo json_encode(['success' => false, 'error' => 'Backup file not found on disk.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1488,7 +1583,7 @@ try {
         $backup_id = trim($_POST['backup_id'] ?? ($_GET['backup_id'] ?? ''));
 
         if (empty($code) || empty($backup_id)) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Library code and backup ID are required.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1498,14 +1593,14 @@ try {
         $bk = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$bk) {
-            http_response_code(404);
+            safe_http_response_code(404);
             echo json_encode(['success' => false, 'error' => "Backup '$backup_id' not found in backup registry."]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         // STRICT TENANT MATCH SECURITY CHECK
         if ($bk['scope'] === 'TENANT' && strtoupper(trim($bk['library_code'])) !== $code) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode([
                 'success' => false,
                 'error' => "CROSS-TENANT RESTORE BLOCKED: Backup {$bk['backup_id']} belongs to tenant '{$bk['library_code']}', cannot restore into target tenant '$code'."
@@ -1514,7 +1609,7 @@ try {
         }
 
         if (!file_exists($bk['file_path'])) {
-            http_response_code(404);
+            safe_http_response_code(404);
             echo json_encode(['success' => false, 'error' => "Backup file does not exist on disk: {$bk['file_path']}"]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1522,7 +1617,7 @@ try {
         // Verify SHA256 Checksum on Backup File
         $actual_sha256 = hash_file('sha256', $bk['file_path']);
         if (!empty($bk['checksum']) && $actual_sha256 !== $bk['checksum']) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode([
                 'success' => false,
                 'error' => "BACKUP CHECKSUM MISMATCH: Backup file hash ($actual_sha256) does not match recorded checksum ({$bk['checksum']}). Restoration aborted."
@@ -1536,13 +1631,13 @@ try {
             $b_pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             $chk_res = $b_pdo->query("PRAGMA integrity_check")->fetchColumn();
             if ($chk_res !== 'ok') {
-                http_response_code(400);
+                safe_http_response_code(400);
                 echo json_encode(['success' => false, 'error' => "Backup file failed SQLite integrity check: $chk_res. Restoration aborted."]);
                 if (defined('IN_TEST_SUITE')) return; else exit();
             }
             $b_pdo = null;
         } catch (Exception $e) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => "Backup file failed SQLite integrity verification: " . $e->getMessage()]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1572,7 +1667,7 @@ try {
 
         // Perform Restore Copy
         if (!copy($bk['file_path'], $target_file)) {
-            http_response_code(500);
+            safe_http_response_code(500);
             echo json_encode(['success' => false, 'error' => "Failed to copy backup file over target database."]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1589,14 +1684,14 @@ try {
                 if (file_exists($safety_file)) {
                     copy($safety_file, $target_file);
                 }
-                http_response_code(500);
+                safe_http_response_code(500);
                 echo json_encode(['success' => false, 'error' => "Restored database failed post-restore verification. Reverted to safety snapshot."]);
                 if (defined('IN_TEST_SUITE')) return; else exit();
             }
             $t_pdo = null;
         } catch (Exception $e) {
             if (file_exists($safety_file)) copy($safety_file, $target_file);
-            http_response_code(500);
+            safe_http_response_code(500);
             echo json_encode(['success' => false, 'error' => "Post-restore database verification exception: " . $e->getMessage()]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1619,7 +1714,7 @@ try {
     } elseif ($action === 'generate_apk_config') {
         $code = strtoupper(trim($_POST['library_code'] ?? ($_GET['library_code'] ?? '')));
         if (empty($code)) {
-            http_response_code(400);
+            safe_http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Library code is required.']);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
@@ -1637,7 +1732,7 @@ try {
         $lib = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$lib) {
-            http_response_code(404);
+            safe_http_response_code(404);
             echo json_encode(['success' => false, 'error' => "Library code not found: $code"]);
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
