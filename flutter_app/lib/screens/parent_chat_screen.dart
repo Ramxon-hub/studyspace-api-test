@@ -27,6 +27,7 @@ class _ParentChatScreenState extends State<ParentChatScreen> {
   bool _isLoading = true;
   bool _isSending = false;
   List<dynamic> _messages = [];
+  int _activeParentId = 0;
   Timer? _pollingTimer;
 
   @override
@@ -55,10 +56,12 @@ class _ParentChatScreenState extends State<ParentChatScreen> {
     if (mounted) {
       if (res['success'] == true) {
         final newMsgs = res['messages'] as List<dynamic>? ?? [];
+        final pid = int.tryParse(res['parent_id']?.toString() ?? '0') ?? (widget.parentId ?? 0);
 
-        if (newMsgs.length != _messages.length || !silent) {
+        if (newMsgs.length != _messages.length || pid != _activeParentId || !silent) {
           setState(() {
             _messages = newMsgs;
+            _activeParentId = pid;
             _isLoading = false;
           });
           _scrollToBottom();
@@ -106,11 +109,23 @@ class _ParentChatScreenState extends State<ParentChatScreen> {
   }
 
   String _formatTime(String rawDate) {
+    if (rawDate.trim().isEmpty) return '';
     try {
-      final dt = DateTime.parse(rawDate);
-      return DateFormat('hh:mm a').format(dt);
+      final dt = DateTime.parse(rawDate).toLocal();
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final msgDate = DateTime(dt.year, dt.month, dt.day);
+
+      final timeStr = DateFormat('hh:mm a').format(dt);
+      if (msgDate == today) {
+        return timeStr;
+      } else if (msgDate == today.subtract(const Duration(days: 1))) {
+        return 'Yesterday $timeStr';
+      } else {
+        return DateFormat('MMM dd, hh:mm a').format(dt);
+      }
     } catch (_) {
-      return '';
+      return rawDate;
     }
   }
 
@@ -202,9 +217,29 @@ class _ParentChatScreenState extends State<ParentChatScreen> {
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
                           final msg = _messages[index];
-                          final role = msg['sender_role'] ?? '';
-                          final isMe = (role == 'parent' || msg['sender_name']?.toString().toLowerCase().contains('parent') == true);
-                          final timeStr = _formatTime(msg['created_at'] ?? '');
+                          final int senderId = int.tryParse(msg['sender_id']?.toString() ?? '0') ?? 0;
+                          final String role = (msg['sender_role'] ?? '').toString().toLowerCase();
+                          final String senderName = (msg['sender_name'] ?? '').toString();
+
+                          bool isMe = false;
+                          if (_activeParentId > 0 && senderId == _activeParentId) {
+                            isMe = true;
+                          } else if (role == 'parent') {
+                            isMe = true;
+                          }
+
+                          String headerTitle = '';
+                          if (isMe) {
+                            headerTitle = 'You (Parent)';
+                          } else if (role == 'admin' || senderName.toLowerCase().contains('admin')) {
+                            headerTitle = 'Admin / Library Owner';
+                          } else if (role == 'student') {
+                            headerTitle = 'Student (${widget.studentName})';
+                          } else {
+                            headerTitle = senderName.isNotEmpty ? senderName : 'Admin / Library Owner';
+                          }
+
+                          final timeStr = _formatTime(msg['created_at']?.toString() ?? '');
 
                           return Align(
                             alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -240,18 +275,19 @@ class _ParentChatScreenState extends State<ParentChatScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  if (!isMe)
-                                    Padding(
-                                      padding: const EdgeInsets.only(bottom: 4),
-                                      child: Text(
-                                        msg['sender_name'] ?? 'Library Admin',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.bold,
-                                          color: isDark ? Colors.amberAccent : AppColors.primaryIndigo,
-                                        ),
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 4),
+                                    child: Text(
+                                      headerTitle,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: isMe
+                                            ? Colors.white70
+                                            : (isDark ? Colors.amberAccent : AppColors.primaryIndigo),
                                       ),
                                     ),
+                                  ),
                                   Text(
                                     msg['message'] ?? '',
                                     style: TextStyle(
@@ -282,7 +318,7 @@ class _ParentChatScreenState extends State<ParentChatScreen> {
                       ),
           ),
 
-          // Input Box
+          // Bottom-Anchored Input Box
           SafeArea(
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

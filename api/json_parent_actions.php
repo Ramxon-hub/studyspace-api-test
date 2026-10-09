@@ -473,18 +473,31 @@ try {
         $admin_id = (int)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
         if ($admin_id <= 0) $admin_id = 1;
 
-        // Mark incoming messages as read for this parent and student
-        $pdo->exec("UPDATE chat_messages SET is_read = 1 WHERE (receiver_id = $parent_id OR receiver_id = $student_id) AND (is_read = 0 OR is_read IS NULL)");
+        // Mark incoming messages as read ONLY for this authenticated parent (or linked student)
+        $stmt_r = $pdo->prepare("
+            UPDATE chat_messages 
+            SET is_read = 1 
+            WHERE (receiver_id = ? OR (receiver_id = ? AND ? > 0)) 
+              AND (is_read = 0 OR is_read IS NULL)
+        ");
+        $stmt_r->execute([$parent_id, $student_id, $student_id]);
 
         $stmt = $pdo->prepare("
             SELECT cm.*, u_send.name as sender_name, u_send.role as sender_role
             FROM chat_messages cm
             JOIN users u_send ON cm.sender_id = u_send.id
-            WHERE (cm.sender_id IN (?, ?) AND cm.receiver_id = ?) 
-               OR (cm.sender_id = ? AND cm.receiver_id IN (?, ?))
-            ORDER BY cm.id ASC
+            WHERE (cm.sender_id = ? AND cm.receiver_id = ?) 
+               OR (cm.sender_id = ? AND cm.receiver_id = ?)
+               OR (cm.sender_id = ? AND cm.receiver_id = ? AND ? > 0)
+               OR (cm.sender_id = ? AND cm.receiver_id = ? AND ? > 0)
+            ORDER BY cm.created_at ASC, cm.id ASC
         ");
-        $stmt->execute([$parent_id, $student_id, $admin_id, $admin_id, $parent_id, $student_id]);
+        $stmt->execute([
+            $parent_id, $admin_id,
+            $admin_id, $parent_id,
+            $student_id, $admin_id, $student_id,
+            $admin_id, $student_id, $student_id
+        ]);
         $messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         echo json_encode([
@@ -520,8 +533,9 @@ try {
         $admin_id = (int)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
         if ($admin_id <= 0) $admin_id = 1;
 
-        $stmt = $pdo->prepare("INSERT INTO chat_messages (sender_id, receiver_id, message, is_read) VALUES (?, ?, ?, 0)");
-        $stmt->execute([$parent_id, $admin_id, $msg_text]);
+        $now = date('Y-m-d H:i:s');
+        $stmt = $pdo->prepare("INSERT INTO chat_messages (sender_id, receiver_id, message, is_read, created_at) VALUES (?, ?, ?, 0, ?)");
+        $stmt->execute([$parent_id, $admin_id, $msg_text, $now]);
         $msg_id = $pdo->lastInsertId();
 
         // Also notify admin
@@ -545,17 +559,21 @@ try {
         $admin_id = (int)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
         if ($admin_id <= 0) $admin_id = 1;
 
-        $unread_chat = (int)$pdo->query("
+        $stmt_uc = $pdo->prepare("
             SELECT COUNT(*) FROM chat_messages 
-            WHERE (receiver_id = $parent_id OR (receiver_id = $student_id AND $student_id > 0)) 
+            WHERE (receiver_id = ? OR (receiver_id = ? AND ? > 0)) 
               AND (is_read = 0 OR is_read IS NULL)
-        ")->fetchColumn();
+        ");
+        $stmt_uc->execute([$parent_id, $student_id, $student_id]);
+        $unread_chat = (int)$stmt_uc->fetchColumn();
 
-        $unread_notif = (int)$pdo->query("
+        $stmt_un = $pdo->prepare("
             SELECT COUNT(*) FROM notifications 
-            WHERE (user_id = $parent_id OR (user_id = $student_id AND $student_id > 0) OR user_id = 0) 
+            WHERE (user_id = ? OR (user_id = ? AND ? > 0) OR user_id = 0) 
               AND (is_read = 0 OR is_read IS NULL)
-        ")->fetchColumn();
+        ");
+        $stmt_un->execute([$parent_id, $student_id, $student_id]);
+        $unread_notif = (int)$stmt_un->fetchColumn();
 
         echo json_encode([
             'success' => true,

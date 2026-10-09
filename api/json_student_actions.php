@@ -300,11 +300,11 @@ try {
             ->execute([$user_id]);
 
         $stmt = $pdo->prepare("
-            SELECT cm.*, u_send.name as sender_name
+            SELECT cm.*, u_send.name as sender_name, u_send.role as sender_role
             FROM chat_messages cm
             JOIN users u_send ON cm.sender_id = u_send.id
             WHERE (cm.sender_id = ? AND cm.receiver_id = ?) OR (cm.sender_id = ? AND cm.receiver_id = ?)
-            ORDER BY cm.id ASC
+            ORDER BY cm.created_at ASC, cm.id ASC
         ");
         $stmt->execute([$user_id, $admin_id, $admin_id, $user_id]);
         $messages = $stmt->fetchAll();
@@ -322,8 +322,9 @@ try {
         $admin_id = (int)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
         if ($admin_id <= 0) $admin_id = 1;
 
-        $stmt = $pdo->prepare("INSERT INTO chat_messages (sender_id, receiver_id, message) VALUES (?, ?, ?)");
-        $stmt->execute([$user_id, $admin_id, $msg_text]);
+        $now = date('Y-m-d H:i:s');
+        $stmt = $pdo->prepare("INSERT INTO chat_messages (sender_id, receiver_id, message, is_read, created_at) VALUES (?, ?, ?, 0, ?)");
+        $stmt->execute([$user_id, $admin_id, $msg_text, $now]);
         $msg_id = $pdo->lastInsertId();
 
         // Get student name for admin notification

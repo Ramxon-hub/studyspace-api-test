@@ -965,27 +965,29 @@ try {
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
-        // Mark student's messages as read unconditionally
-        $pdo->exec("UPDATE chat_messages SET is_read = 1 WHERE sender_id = $student_id OR receiver_id = $student_id");
+        // Mark incoming messages sent to admin as read
+        $stmt_r = $pdo->prepare("UPDATE chat_messages SET is_read = 1 WHERE receiver_id = ? AND sender_id = ? AND (is_read = 0 OR is_read IS NULL)");
+        $stmt_r->execute([$admin_id, $student_id]);
 
-        // Mark all notification popups for admin as read so alerts stop repeating
-        $pdo->exec("UPDATE notifications SET is_read = 1 WHERE user_id = $admin_id OR user_id = 1 OR user_id = 0");
+        // Mark notification popups for admin as read so alerts stop repeating
+        $stmt_n = $pdo->prepare("UPDATE notifications SET is_read = 1 WHERE (user_id = ? OR user_id = 1 OR user_id = 0) AND (is_read = 0 OR is_read IS NULL)");
+        $stmt_n->execute([$admin_id]);
 
         save_db_snapshot($pdo);
 
         $stmt = $pdo->prepare("
-            SELECT cm.*, u_send.name as sender_name
+            SELECT cm.*, u_send.name as sender_name, u_send.role as sender_role
             FROM chat_messages cm
             JOIN users u_send ON cm.sender_id = u_send.id
             WHERE (cm.sender_id = ? AND cm.receiver_id = ?) OR (cm.sender_id = ? AND cm.receiver_id = ?)
-            ORDER BY cm.id ASC
+            ORDER BY cm.created_at ASC, cm.id ASC
         ");
         $stmt->execute([$student_id, $admin_id, $admin_id, $student_id]);
-        $messages = $stmt->fetchAll();
+        $messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $stmt_u = $pdo->prepare("SELECT id, name, phone, status FROM users WHERE id = ?");
+        $stmt_u = $pdo->prepare("SELECT id, name, phone, status, role FROM users WHERE id = ?");
         $stmt_u->execute([$student_id]);
-        $student = $stmt_u->fetch();
+        $student = $stmt_u->fetch(PDO::FETCH_ASSOC);
 
         echo json_encode([
             'success' => true,
@@ -1007,8 +1009,9 @@ try {
         $admin_id = (int)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
         if ($admin_id <= 0) $admin_id = 1;
 
-        $stmt = $pdo->prepare("INSERT INTO chat_messages (sender_id, receiver_id, message) VALUES (?, ?, ?)");
-        $stmt->execute([$admin_id, $student_id, $msg_text]);
+        $now = date('Y-m-d H:i:s');
+        $stmt = $pdo->prepare("INSERT INTO chat_messages (sender_id, receiver_id, message, is_read, created_at) VALUES (?, ?, ?, 0, ?)");
+        $stmt->execute([$admin_id, $student_id, $msg_text, $now]);
         $msg_id = $pdo->lastInsertId();
 
         // Also insert notification for student so app gets push notification pop-up
