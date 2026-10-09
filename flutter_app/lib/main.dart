@@ -33,6 +33,7 @@ import 'screens/manage_students_screen.dart';
 import 'screens/manage_shifts_screen.dart';
 import 'screens/db_backup_screen.dart';
 import 'screens/app_settings_screen.dart';
+import 'screens/admin_parents_screen.dart';
 
 import 'screens/super_admin_login_screen.dart';
 
@@ -249,6 +250,7 @@ class StudyLibraryApp extends StatelessWidget {
         '/manage_shifts': (context) => const ManageShiftsScreen(),
         '/db_backup': (context) => const DbBackupScreen(),
         '/app_settings': (context) => const AppSettingsScreen(),
+        '/manage_parents': (context) => const AdminParentsScreen(),
       },
     );
   }

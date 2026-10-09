@@ -1,14 +1,24 @@
 <?php
+
+if (!function_exists('safe_http_response_code')) {
+    function safe_http_response_code($code) {
+        if (!headers_sent()) {
+            @http_response_code($code);
+        }
+    }
+}
 // api/json_admin_actions.php - Mobile REST API for Admin Dashboard & Management
 
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('Content-Type: application/json');
+if (!headers_sent()) {
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+    header('Content-Type: application/json');
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
+    safe_http_response_code(200);
+    if (defined('IN_TEST_SUITE')) return; else exit();
 }
 
 require_once __DIR__ . '/../config/db.php';
@@ -27,6 +37,10 @@ if (!empty($raw_input)) {
 
 $action = $_GET['action'] ?? ($_POST['action'] ?? '');
 
+$tenant_ctx = resolve_tenant_context();
+$pdo = $tenant_ctx['pdo'];
+$current_tenant_code = $tenant_ctx['library_code'];
+
 try {
     $pdo->exec("UPDATE users SET status = 'approved' WHERE (status = 'pending' OR status = 'active') AND id IN (SELECT user_id FROM allocations WHERE status = 'active')");
 
@@ -37,7 +51,7 @@ try {
             'user_count' => (int)$pdo->query("SELECT COUNT(*) FROM users")->fetchColumn(),
             'students' => $pdo->query("SELECT id, name, email, status, is_deleted FROM users")->fetchAll()
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
     }
 
     if ($action === 'get_dashboard_stats') {
@@ -64,7 +78,7 @@ try {
                 'unread_chats_count' => (int)$unread_chats
             ]
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_pending_students') {
         $pending = $pdo->query("
@@ -87,7 +101,7 @@ try {
             'shifts' => $shifts,
             'active_allocations' => $active_allocations
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'allot_seat') {
         $student_id = (int)($_POST['student_id'] ?? 0);
@@ -96,7 +110,7 @@ try {
 
         if ($student_id <= 0 || $seat_id <= 0) {
             echo json_encode(['success' => false, 'message' => 'Please select a valid student and seat desk.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         try {
@@ -108,7 +122,7 @@ try {
             if (!$stmt_u_chk->fetch()) {
                 $pdo->rollBack();
                 echo json_encode(['success' => false, 'message' => "Student (ID: $student_id) does not exist in the database."]);
-                exit();
+                if (defined('IN_TEST_SUITE')) return; else exit();
             }
 
             // Verify seat desk exists
@@ -117,7 +131,7 @@ try {
             if (!$stmt_s_chk->fetch()) {
                 $pdo->rollBack();
                 echo json_encode(['success' => false, 'message' => "Seat Desk (ID: $seat_id) does not exist in the database."]);
-                exit();
+                if (defined('IN_TEST_SUITE')) return; else exit();
             }
 
             // Verify shift exists
@@ -126,7 +140,7 @@ try {
             if (!$stmt_sh_chk->fetch()) {
                 $pdo->rollBack();
                 echo json_encode(['success' => false, 'message' => "Shift (ID: $shift_id) does not exist in the database."]);
-                exit();
+                if (defined('IN_TEST_SUITE')) return; else exit();
             }
 
             // Check if seat desk is already occupied in this shift by another student
@@ -146,7 +160,7 @@ try {
                     'success' => false,
                     'message' => "Seat Desk {$occupied['seat_number']} is ALREADY OCCUPIED by {$occupied['student_name']} in {$occupied['shift_name']}! Please select an available desk."
                 ]);
-                exit();
+                if (defined('IN_TEST_SUITE')) return; else exit();
             }
 
             // Fetch original start_date for student if re-allotting seat
@@ -183,13 +197,13 @@ try {
             $pdo->commit();
 
             echo json_encode(['success' => true, 'message' => "Seat Desk $seat_no allotted successfully!"]);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         } catch (Exception $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
             echo json_encode(['success' => false, 'message' => 'Failed to allot seat desk: ' . $e->getMessage()]);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
     } elseif ($action === 'get_live_attendance') {
@@ -254,7 +268,7 @@ try {
             'absent_outside' => $absent_count,
             'attendance_list' => $students_att
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_12month_master_fee_report') {
         $stmt_students = $pdo->query("
@@ -341,7 +355,7 @@ try {
             'web_report_url' => 'https://library-management-hmwx.onrender.com/master_12month_fee_report.php',
             'students' => $report_data
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_shifts') {
         $stmt = $pdo->query("
@@ -354,7 +368,7 @@ try {
         $shifts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         echo json_encode(['success' => true, 'shifts' => $shifts]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'add_shift') {
         $name = trim($_POST['name'] ?? '');
@@ -364,7 +378,7 @@ try {
 
         if (empty($name) || empty($start_time) || empty($end_time) || $fee_amount <= 0) {
             echo json_encode(['success' => false, 'message' => 'Please provide valid shift name, start time, end time, and fee amount.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("INSERT INTO shifts (name, start_time, end_time, fee_amount, is_active) VALUES (?, ?, ?, ?, 1)");
@@ -372,7 +386,7 @@ try {
         save_db_snapshot($pdo);
 
         echo json_encode(['success' => true, 'message' => "New Shift '$name' added successfully!"]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'edit_shift') {
         $shift_id = (int)($_POST['shift_id'] ?? 0);
@@ -383,7 +397,7 @@ try {
 
         if (!$shift_id || empty($name) || empty($start_time) || empty($end_time) || $fee_amount <= 0) {
             echo json_encode(['success' => false, 'message' => 'Please fill in all required shift fields correctly.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("UPDATE shifts SET name = ?, start_time = ?, end_time = ?, fee_amount = ? WHERE id = ?");
@@ -391,7 +405,7 @@ try {
         save_db_snapshot($pdo);
 
         echo json_encode(['success' => true, 'message' => "Shift '$name' details updated successfully!"]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'toggle_shift') {
         $shift_id = (int)($_POST['shift_id'] ?? 0);
@@ -399,7 +413,7 @@ try {
 
         if (!$shift_id) {
             echo json_encode(['success' => false, 'message' => 'Shift ID is required.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("UPDATE shifts SET is_active = ? WHERE id = ?");
@@ -408,7 +422,7 @@ try {
 
         $status_text = ($is_active == 1) ? 'activated' : 'deactivated';
         echo json_encode(['success' => true, 'message' => "Shift has been $status_text."]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'admin_attendance_toggle') {
         $student_id = (int)($_POST['student_id'] ?? 0);
@@ -433,7 +447,7 @@ try {
             }
             echo json_encode(['success' => true, 'message' => 'Admin checked out student at ' . $current_time]);
         }
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'send_notification') {
         $title = trim($_POST['title'] ?? 'Notice');
@@ -442,7 +456,7 @@ try {
 
         if (empty($message)) {
             echo json_encode(['success' => false, 'message' => 'Notification content cannot be empty.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         // Auto-delete notifications older than 2 days (48 hours)
@@ -455,7 +469,7 @@ try {
         $stmt_ins->execute([$title, $message, $target_user_id]);
 
         echo json_encode(['success' => true, 'message' => 'Notification sent successfully!']);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'bulk_create_seats') {
         $row_label = strtoupper(trim($_POST['row_label'] ?? 'A'));
@@ -465,7 +479,7 @@ try {
 
         if (empty($row_label) || $start_num <= 0 || $end_num < $start_num) {
             echo json_encode(['success' => false, 'message' => 'Invalid range parameters.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $created_count = 0;
@@ -491,7 +505,7 @@ try {
             'success' => true,
             'message' => "Created $created_count new seat desks in Row $row_label ($start_num to $end_num)!"
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'delete_seat') {
         $seat_id = (int)($_POST['seat_id'] ?? 0);
@@ -502,7 +516,7 @@ try {
         } else {
             echo json_encode(['success' => false, 'message' => 'Invalid seat ID.']);
         }
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_all_complaints') {
         $complaints = $pdo->query("
@@ -512,7 +526,7 @@ try {
             ORDER BY c.id DESC
         ")->fetchAll();
         echo json_encode(['success' => true, 'complaints' => $complaints]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'update_complaint_status') {
         $complaint_id = (int)($_POST['complaint_id'] ?? 0);
@@ -537,7 +551,7 @@ try {
         } else {
             echo json_encode(['success' => false, 'message' => 'Invalid complaint ticket ID.']);
         }
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_fee_payments') {
         require_once __DIR__ . '/../config/auth.php';
@@ -598,7 +612,7 @@ try {
             ],
             'payments' => $payments_list,
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'record_fee_payment') {
         require_once __DIR__ . '/../config/auth.php';
@@ -610,7 +624,7 @@ try {
 
         if ($allocation_id <= 0 || $user_id <= 0 || $amount <= 0) {
             echo json_encode(['success' => false, 'message' => 'Invalid fee payment details provided.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         // Fetch student start date
@@ -678,7 +692,7 @@ try {
             'message' => "Payment of ₹$amount for $month_label recorded successfully!",
             'receipt_no' => $receipt_no,
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_student_fee_history') {
         $student_id = (int)($_GET['user_id'] ?? $_POST['user_id'] ?? 0);
@@ -705,7 +719,7 @@ try {
             'success' => true,
             'fee_history' => $payments
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'backup_db') {
         $tenant_ctx = resolve_tenant_context();
@@ -737,7 +751,7 @@ try {
         if (file_exists($temp_backup)) {
             @unlink($temp_backup);
         }
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_database_backup_info') {
         $tenant_ctx = resolve_tenant_context();
@@ -746,10 +760,10 @@ try {
 
         if (!file_exists($db_file)) {
             echo json_encode(['success' => false, 'message' => 'Database file not found for tenant ' . strtoupper($current_code)]);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
-        $tables = ['users', 'seats', 'shifts', 'allocations', 'fee_payments', 'attendance', 'complaints', 'chat_messages', 'notifications', 'system_settings'];
+        $tables = ['users', 'parent_student_links', 'seats', 'shifts', 'allocations', 'fee_payments', 'attendance', 'complaints', 'chat_messages', 'notifications', 'system_settings', 'schema_migrations'];
         $counts = [];
         foreach ($tables as $t) {
             try {
@@ -763,16 +777,26 @@ try {
         $host = $_SERVER['HTTP_HOST'] ?? 'library-management-hmwx.onrender.com';
         $base_url = "$protocol://$host";
         $timestamp = date('Ymd_His');
+        $sha256 = file_exists($db_file) ? hash_file('sha256', $db_file) : '';
+        
+        $integrity_status = 'ok';
+        try {
+            $integrity_status = (string)$pdo->query("PRAGMA integrity_check")->fetchColumn();
+        } catch (Exception $e) {
+            $integrity_status = $e->getMessage();
+        }
 
         echo json_encode([
             'success' => true,
             'filename' => "tenant_" . $current_code . "_backup_" . $timestamp . ".sqlite",
             'db_size_bytes' => filesize($db_file),
             'db_size_formatted' => round(filesize($db_file) / 1024, 2) . " KB",
+            'sha256' => $sha256,
+            'integrity_status' => $integrity_status,
             'table_counts' => $counts,
             'backup_url' => "$base_url/api/json_admin_actions.php?action=backup_db&code=" . strtoupper($current_code)
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_db_fingerprint') {
         $req_role = strtolower(trim($_GET['user_role'] ?? ($_POST['user_role'] ?? ($_SESSION['user_role'] ?? ''))));
@@ -784,9 +808,9 @@ try {
             } catch (Exception $e) {}
         }
         if (!$is_admin_user) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'ACCESS DENIED: Diagnostic fingerprint is restricted to Admin access only.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $summary = get_db_identity_summary($pdo);
@@ -813,19 +837,19 @@ try {
                 'server_time' => date('Y-m-d H:i:s')
             ])
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'restore_db') {
         $user_role = strtolower(trim($_SESSION['user_role'] ?? ''));
         if ($user_role !== 'admin' && !is_admin()) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'ACCESS DENIED: Database restore is restricted to Admin access only.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         if (db_is_postgres()) {
             echo json_encode(['success' => false, 'message' => 'SQLite file-based database restore is not applicable in PostgreSQL mode.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         if (isset($_FILES['backup_file']) && $_FILES['backup_file']['error'] === UPLOAD_ERR_OK) {
@@ -895,7 +919,7 @@ try {
         } else {
             echo json_encode(['success' => false, 'message' => 'No database backup file uploaded.']);
         }
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_admin_chat_threads') {
         try {
@@ -929,7 +953,7 @@ try {
         $threads = $stmt->fetchAll();
 
         echo json_encode(['success' => true, 'threads' => $threads]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_admin_chat_messages') {
         $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
@@ -938,7 +962,7 @@ try {
 
         if ($student_id <= 0) {
             echo json_encode(['success' => false, 'message' => 'Student ID is required.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         // Mark student's messages as read unconditionally
@@ -969,7 +993,7 @@ try {
             'student' => $student,
             'admin_id' => $admin_id
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'send_admin_chat_message') {
         $student_id = (int)($_POST['student_id'] ?? 0);
@@ -977,7 +1001,7 @@ try {
 
         if ($student_id <= 0 || empty($msg_text)) {
             echo json_encode(['success' => false, 'message' => 'Invalid student ID or message content.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $admin_id = (int)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
@@ -996,7 +1020,7 @@ try {
         save_db_snapshot($pdo);
 
         echo json_encode(['success' => true, 'message_id' => $msg_id]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_all_students') {
         try {
@@ -1023,7 +1047,7 @@ try {
         $students = $stmt->fetchAll();
 
         echo json_encode(['success' => true, 'students' => $students]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_seats_with_status') {
         $shift_id = (int)($_POST['shift_id'] ?? ($_GET['shift_id'] ?? 1));
@@ -1072,7 +1096,7 @@ try {
         }
 
         echo json_encode(['success' => true, 'seats' => $result_seats]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'update_student') {
         $student_id = (int)($_POST['student_id'] ?? ($_GET['student_id'] ?? 0));
@@ -1088,7 +1112,7 @@ try {
 
         if ($student_id <= 0) {
             echo json_encode(['success' => false, 'message' => 'Invalid student ID.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         try {
@@ -1101,7 +1125,7 @@ try {
             if (!$stu) {
                 $pdo->rollBack();
                 echo json_encode(['success' => false, 'message' => 'Student record not found.']);
-                exit();
+                if (defined('IN_TEST_SUITE')) return; else exit();
             }
 
             $old_seat_no = null;
@@ -1135,7 +1159,7 @@ try {
                 if (!$seat_obj) {
                     $pdo->rollBack();
                     echo json_encode(['success' => false, 'message' => 'Selected seat desk is invalid or inactive.']);
-                    exit();
+                    if (defined('IN_TEST_SUITE')) return; else exit();
                 }
                 $new_seat_no = $seat_obj['seat_number'];
 
@@ -1163,7 +1187,7 @@ try {
                             'success' => false,
                             'message' => "Seat {$occupied['seat_number']} is already assigned to {$occupied['occupant_name']} in {$occupied['shift_name']}."
                         ]);
-                        exit();
+                        if (defined('IN_TEST_SUITE')) return; else exit();
                     }
 
                     // 4. Release/End previous active allocations
@@ -1203,21 +1227,21 @@ try {
                 'old_seat' => $old_seat_no,
                 'new_seat' => $new_seat_no ?? $old_seat_no
             ]);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
 
         } catch (Exception $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
             echo json_encode(['success' => false, 'message' => 'Transaction failed: ' . $e->getMessage()]);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
     } elseif ($action === 'delete_student' || $action === 'soft_delete_student') {
         $student_id = (int)($_POST['student_id'] ?? ($_GET['student_id'] ?? 0));
         if ($student_id <= 0) {
             echo json_encode(['success' => false, 'message' => 'Invalid student ID.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt_name = $pdo->prepare("SELECT name FROM users WHERE id = ? AND role = 'student'");
@@ -1226,7 +1250,7 @@ try {
 
         if (!$student_name) {
             echo json_encode(['success' => false, 'message' => 'Student record not found.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $now = date('Y-m-d H:i:s');
@@ -1234,7 +1258,7 @@ try {
         $pdo->prepare("UPDATE allocations SET status = 'cancelled' WHERE user_id = ?")->execute([$student_id]);
 
         echo json_encode(['success' => true, 'message' => "Student '$student_name' moved to Recycle Bin (Kept for 60 days)."]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_recycle_bin_students') {
         // Auto-purge items older than 60 days
@@ -1264,13 +1288,13 @@ try {
         $deleted_students = $stmt->fetchAll();
 
         echo json_encode(['success' => true, 'students' => $deleted_students]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'restore_student') {
         $student_id = (int)($_POST['student_id'] ?? ($_GET['student_id'] ?? 0));
         if ($student_id <= 0) {
             echo json_encode(['success' => false, 'message' => 'Invalid student ID.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt_name = $pdo->prepare("SELECT name FROM users WHERE id = ? AND role = 'student'");
@@ -1279,19 +1303,19 @@ try {
 
         if (!$student_name) {
             echo json_encode(['success' => false, 'message' => 'Student record not found.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $pdo->prepare("UPDATE users SET is_deleted = 0, deleted_at = NULL, status = 'pending' WHERE id = ? AND role = 'student'")->execute([$student_id]);
 
         echo json_encode(['success' => true, 'message' => "Student '$student_name' restored to active list successfully."]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'permanent_delete_student') {
         $student_id = (int)($_POST['student_id'] ?? ($_GET['student_id'] ?? 0));
         if ($student_id <= 0) {
             echo json_encode(['success' => false, 'message' => 'Invalid student ID.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt_name = $pdo->prepare("SELECT name FROM users WHERE id = ? AND role = 'student'");
@@ -1300,7 +1324,7 @@ try {
 
         if (!$student_name) {
             echo json_encode(['success' => false, 'message' => 'Student record not found.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         // Purge student record from all tables
@@ -1313,7 +1337,7 @@ try {
         $pdo->prepare("DELETE FROM users WHERE id = ? AND role = 'student'")->execute([$student_id]);
 
         echo json_encode(['success' => true, 'message' => "Student record '$student_name' permanently deleted from database."]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_admin_notifications') {
         $req_user_id = (int)($_GET['user_id'] ?? ($_POST['user_id'] ?? 0));
@@ -1321,7 +1345,7 @@ try {
             $user_role = $pdo->query("SELECT role FROM users WHERE id = $req_user_id")->fetchColumn();
             if ($user_role !== 'admin') {
                 echo json_encode(['success' => true, 'admin_notifications' => []]);
-                exit();
+                if (defined('IN_TEST_SUITE')) return; else exit();
             }
         }
 
@@ -1385,7 +1409,7 @@ try {
             'success' => true,
             'admin_notifications' => $admin_notifs
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_app_settings') {
         $settings = [];
@@ -1404,7 +1428,7 @@ try {
                 'app_tagline' => $settings['app_tagline'] ?? 'Quiet Environment & High-Speed Wi-Fi'
             ]
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'update_app_settings') {
         $app_name = trim($_POST['app_name'] ?? '');
@@ -1447,7 +1471,7 @@ try {
         } catch (Exception $e) {
             echo json_encode(['success' => false, 'message' => 'Failed to update app settings: ' . $e->getMessage()]);
         }
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'restore_database') {
         $res = restore_db_snapshot($pdo);
@@ -1457,7 +1481,7 @@ try {
             'message' => $res ? "Database snapshot restored successfully with $total_students students!" : "Failed to restore snapshot.",
             'total_students' => (int)$total_students
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_parents') {
         $parents = $pdo->query("
@@ -1483,13 +1507,19 @@ try {
             'parents' => $parents,
             'all_students' => $all_students
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'create_parent') {
         $name = trim($_POST['name'] ?? '');
         $email = trim($_POST['email'] ?? '');
         $phone = trim($_POST['phone'] ?? '');
         $password = trim($_POST['password'] ?? '');
+        $relationship = trim($_POST['relationship'] ?? 'Father');
+        $status = trim($_POST['status'] ?? 'approved');
+        if (!in_array($status, ['approved', 'active', 'disabled', 'pending'])) {
+            $status = 'approved';
+        }
+
         $student_ids = $_POST['student_ids'] ?? [];
         if (is_string($student_ids)) {
             $student_ids = json_decode($student_ids, true) ?: [$student_ids];
@@ -1497,56 +1527,103 @@ try {
 
         if (empty($name) || empty($email) || empty($password)) {
             echo json_encode(['success' => false, 'message' => 'Parent Name, Email, and Password are required.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt_check = $pdo->prepare("SELECT id FROM users WHERE email = ?");
         $stmt_check->execute([$email]);
         if ($stmt_check->fetch()) {
-            echo json_encode(['success' => false, 'message' => 'An account with this email already exists.']);
-            exit();
+            echo json_encode(['success' => false, 'message' => 'An account with this email already exists in this tenant.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
-        $hashed = password_hash($password, PASSWORD_DEFAULT);
-        $stmt_ins = $pdo->prepare("INSERT INTO users (name, email, phone, password, role, status) VALUES (?, ?, ?, ?, 'parent', 'approved')");
-        $stmt_ins->execute([$name, $email, $phone, $hashed]);
-        $parent_id = $pdo->lastInsertId();
+        try {
+            $pdo->beginTransaction();
+            $hashed = password_hash($password, PASSWORD_DEFAULT);
+            $stmt_ins = $pdo->prepare("INSERT INTO users (name, email, phone, password, role, status) VALUES (?, ?, ?, ?, 'parent', ?)");
+            $stmt_ins->execute([$name, $email, $phone, $hashed, $status]);
+            $parent_id = $pdo->lastInsertId();
 
-        if (!empty($student_ids) && is_array($student_ids)) {
-            $stmt_link = $pdo->prepare("INSERT INTO parent_student_links (parent_user_id, student_user_id, status) VALUES (?, ?, 'active')");
-            foreach ($student_ids as $sid) {
-                $sid = (int)$sid;
-                if ($sid > 0) {
-                    try { $stmt_link->execute([$parent_id, $sid]); } catch (Exception $e) {}
+            if (!empty($student_ids) && is_array($student_ids)) {
+                $stmt_v = $pdo->prepare("SELECT id FROM users WHERE id = ? AND role = 'student' AND (is_deleted IS NULL OR is_deleted = 0)");
+                $stmt_link = $pdo->prepare("INSERT INTO parent_student_links (parent_user_id, student_user_id, relationship, status) VALUES (?, ?, ?, 'active')");
+                foreach ($student_ids as $sid) {
+                    $sid = (int)$sid;
+                    if ($sid > 0) {
+                        $stmt_v->execute([$sid]);
+                        if ($stmt_v->fetch()) {
+                            try { $stmt_link->execute([$parent_id, $sid, $relationship]); } catch (Exception $ex) {}
+                        }
+                    }
                 }
             }
+
+            $pdo->commit();
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Parent account created successfully and linked to students.',
+                'parent_id' => $parent_id
+            ]);
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            echo json_encode(['success' => false, 'message' => 'Failed to create parent account: ' . $e->getMessage()]);
+        }
+        if (defined('IN_TEST_SUITE')) return; else exit();
+
+    } elseif ($action === 'edit_parent') {
+        $parent_id = (int)($_POST['parent_id'] ?? 0);
+        $name = trim($_POST['name'] ?? '');
+        $email = trim($_POST['email'] ?? '');
+        $phone = trim($_POST['phone'] ?? '');
+        $status = trim($_POST['status'] ?? 'approved');
+
+        if ($parent_id <= 0 || empty($name) || empty($email)) {
+            echo json_encode(['success' => false, 'message' => 'Parent ID, Name, and Email are required.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
-        echo json_encode([
-            'success' => true,
-            'message' => 'Parent account created successfully and linked to students.',
-            'parent_id' => $parent_id
-        ]);
-        exit();
+        $stmt_check = $pdo->prepare("SELECT id FROM users WHERE email = ? AND id != ?");
+        $stmt_check->execute([$email, $parent_id]);
+        if ($stmt_check->fetch()) {
+            echo json_encode(['success' => false, 'message' => 'Another account with this email already exists.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $stmt_upd = $pdo->prepare("UPDATE users SET name = ?, email = ?, phone = ?, status = ? WHERE id = ? AND role = 'parent'");
+        $stmt_upd->execute([$name, $email, $phone, $status, $parent_id]);
+
+        echo json_encode(['success' => true, 'message' => 'Parent details updated successfully.']);
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'link_parent_student') {
         $parent_id = (int)($_POST['parent_id'] ?? 0);
         $student_id = (int)($_POST['student_id'] ?? 0);
+        $relationship = trim($_POST['relationship'] ?? 'Father');
 
         if ($parent_id <= 0 || $student_id <= 0) {
             echo json_encode(['success' => false, 'message' => 'Valid Parent ID and Student ID are required.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
-        $stmt_link = $pdo->prepare("INSERT INTO parent_student_links (parent_user_id, student_user_id, status) VALUES (?, ?, 'active')");
+        $stmt_v = $pdo->prepare("SELECT id FROM users WHERE id = ? AND role = 'student' AND (is_deleted IS NULL OR is_deleted = 0)");
+        $stmt_v->execute([$student_id]);
+        if (!$stmt_v->fetch()) {
+            echo json_encode(['success' => false, 'message' => 'Student ID is not valid in current tenant.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $stmt_link = $pdo->prepare("INSERT INTO parent_student_links (parent_user_id, student_user_id, relationship, status) VALUES (?, ?, ?, 'active')");
         try {
-            $stmt_link->execute([$parent_id, $student_id]);
+            $stmt_link->execute([$parent_id, $student_id, $relationship]);
             echo json_encode(['success' => true, 'message' => 'Student linked to Parent successfully.']);
         } catch (Exception $e) {
-            $pdo->prepare("UPDATE parent_student_links SET status = 'active' WHERE parent_user_id = ? AND student_user_id = ?")->execute([$parent_id, $student_id]);
+            $pdo->prepare("UPDATE parent_student_links SET status = 'active', relationship = ? WHERE parent_user_id = ? AND student_user_id = ?")->execute([$relationship, $parent_id, $student_id]);
             echo json_encode(['success' => true, 'message' => 'Parent-student link updated to active.']);
         }
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'unlink_parent_student') {
         $parent_id = (int)($_POST['parent_id'] ?? 0);
@@ -1554,20 +1631,20 @@ try {
 
         if ($parent_id <= 0 || $student_id <= 0) {
             echo json_encode(['success' => false, 'message' => 'Valid Parent ID and Student ID are required.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt_del = $pdo->prepare("DELETE FROM parent_student_links WHERE parent_user_id = ? AND student_user_id = ?");
         $stmt_del->execute([$parent_id, $student_id]);
 
         echo json_encode(['success' => true, 'message' => 'Student unlinked from Parent successfully.']);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'toggle_parent_status') {
         $parent_id = (int)($_POST['parent_id'] ?? 0);
         if ($parent_id <= 0) {
             echo json_encode(['success' => false, 'message' => 'Valid Parent ID required.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("SELECT status FROM users WHERE id = ? AND role = 'parent'");
@@ -1576,7 +1653,7 @@ try {
 
         if (!$curr_status) {
             echo json_encode(['success' => false, 'message' => 'Parent user not found.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $new_status = ($curr_status === 'approved' || $curr_status === 'active') ? 'disabled' : 'approved';
@@ -1587,7 +1664,7 @@ try {
             'message' => "Parent account status updated to $new_status.",
             'new_status' => $new_status
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'reset_parent_password') {
         $parent_id = (int)($_POST['parent_id'] ?? 0);
@@ -1595,21 +1672,73 @@ try {
 
         if ($parent_id <= 0 || empty($new_pass)) {
             echo json_encode(['success' => false, 'message' => 'Parent ID and New Password are required.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $hashed = password_hash($new_pass, PASSWORD_DEFAULT);
         $pdo->prepare("UPDATE users SET password = ? WHERE id = ? AND role = 'parent'")->execute([$hashed, $parent_id]);
 
         echo json_encode(['success' => true, 'message' => 'Parent password reset successfully.']);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
+
+    } elseif ($action === 'get_parent_activity') {
+        $parent_id = (int)($_GET['parent_id'] ?? ($_POST['parent_id'] ?? 0));
+        if ($parent_id <= 0) {
+            echo json_encode(['success' => false, 'message' => 'Parent ID is required.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $linked_students = get_parent_linked_students($pdo, $parent_id);
+        $student_ids = array_column($linked_students, 'id');
+
+        $attendance = [];
+        $fees = [];
+        $complaints = [];
+        $chat = [];
+
+        if (!empty($student_ids)) {
+            $in_clause = implode(',', array_fill(0, count($student_ids), '?'));
+
+            $stmt_att = $pdo->prepare("SELECT * FROM attendance WHERE user_id IN ($in_clause) ORDER BY date DESC LIMIT 30");
+            $stmt_att->execute($student_ids);
+            $attendance = $stmt_att->fetchAll(PDO::FETCH_ASSOC);
+
+            $stmt_fees = $pdo->prepare("SELECT * FROM fee_payments WHERE user_id IN ($in_clause) ORDER BY payment_date DESC LIMIT 30");
+            $stmt_fees->execute($student_ids);
+            $fees = $stmt_fees->fetchAll(PDO::FETCH_ASSOC);
+
+            $stmt_comp = $pdo->prepare("SELECT * FROM complaints WHERE user_id IN ($in_clause) ORDER BY id DESC LIMIT 30");
+            $stmt_comp->execute($student_ids);
+            $complaints = $stmt_comp->fetchAll(PDO::FETCH_ASSOC);
+
+            $stmt_chat = $pdo->prepare("
+                SELECT cm.*, u_send.name as sender_name
+                FROM chat_messages cm
+                JOIN users u_send ON cm.sender_id = u_send.id
+                WHERE cm.sender_id IN ($in_clause) OR cm.receiver_id IN ($in_clause) OR cm.sender_id = ? OR cm.receiver_id = ?
+                ORDER BY cm.id DESC LIMIT 30
+            ");
+            $params = array_merge($student_ids, [$parent_id, $parent_id]);
+            $stmt_chat->execute($params);
+            $chat = $stmt_chat->fetchAll(PDO::FETCH_ASSOC);
+        }
+
+        echo json_encode([
+            'success' => true,
+            'linked_students' => $linked_students,
+            'attendance' => $attendance,
+            'fees' => $fees,
+            'complaints' => $complaints,
+            'chat' => $chat
+        ]);
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } else {
         echo json_encode(['success' => false, 'message' => 'Invalid admin action specified.']);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
     }
 } catch (Exception $e) {
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
-    exit();
+    if (defined('IN_TEST_SUITE')) return; else exit();
 }
 ?>

@@ -82,6 +82,7 @@ function get_parent_linked_students($pdo, $parent_id) {
     try {
         $stmt = $pdo->prepare("
             SELECT u.id, u.name, u.email, u.phone, u.father_name, u.status, u.preparation_for, u.created_at,
+                   l.relationship,
                    a.id as allocation_id, s.seat_number, s.row_label, sh.name as shift_name, sh.start_time, sh.end_time, sh.fee_amount
             FROM parent_student_links l
             JOIN users u ON l.student_user_id = u.id

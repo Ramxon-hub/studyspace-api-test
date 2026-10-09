@@ -1,14 +1,24 @@
 <?php
+
+if (!function_exists('safe_http_response_code')) {
+    function safe_http_response_code($code) {
+        if (!headers_sent()) {
+            @http_response_code($code);
+        }
+    }
+}
 // api/json_parent_actions.php - REST API for Parent Portal System
 
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('Content-Type: application/json');
+if (!headers_sent()) {
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+    header('Content-Type: application/json');
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
+    safe_http_response_code(200);
+    if (defined('IN_TEST_SUITE')) return; else exit();
 }
 
 require_once __DIR__ . '/../config/db.php';
@@ -27,13 +37,17 @@ if (!empty($raw_input)) {
 
 $action = $_GET['action'] ?? ($_POST['action'] ?? '');
 
+$tenant_ctx = resolve_tenant_context();
+$pdo = $tenant_ctx['pdo'];
+$current_tenant_code = $tenant_ctx['library_code'];
+
 // Resolve Parent Identity from Session, Request Parameter, or HTTP Header
 $parent_id = (int)($_SESSION['user_id'] ?? ($_REQUEST['parent_id'] ?? ($_REQUEST['parent_user_id'] ?? ($_REQUEST['user_id'] ?? ($_SERVER['HTTP_X_PARENT_ID'] ?? 0)))));
 
 if ($parent_id <= 0) {
-    http_response_code(401);
+    safe_http_response_code(401);
     echo json_encode(['success' => false, 'message' => 'Unauthorized access. Active parent session required.']);
-    exit();
+    if (defined('IN_TEST_SUITE')) return; else exit();
 }
 
 // Fetch and validate parent user profile from active tenant DB
@@ -42,9 +56,9 @@ $stmt_p->execute([$parent_id]);
 $parent_user = $stmt_p->fetch(PDO::FETCH_ASSOC);
 
 if (!$parent_user) {
-    http_response_code(401);
+    safe_http_response_code(401);
     echo json_encode(['success' => false, 'message' => 'Unauthorized access. Active parent session required.']);
-    exit();
+    if (defined('IN_TEST_SUITE')) return; else exit();
 }
 
 $_SESSION['user_id'] = $parent_id;
@@ -58,7 +72,7 @@ try {
             'parent' => $parent_user,
             'linked_students' => $students
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'linked_students') {
         $students = get_parent_linked_students($pdo, $parent_id);
@@ -66,7 +80,7 @@ try {
             'success' => true,
             'linked_students' => $students
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'student_summary') {
         $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
@@ -80,9 +94,9 @@ try {
         }
 
         if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         // Fetch Student Details
@@ -130,16 +144,16 @@ try {
             ],
             'fee_status' => $fee_status
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'attendance_history') {
         $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
         $month = trim($_GET['month'] ?? ($_POST['month'] ?? date('Y-m')));
 
         if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("
@@ -169,15 +183,15 @@ try {
             'absent_count' => $absent_count,
             'records' => $records
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'fee_history') {
         $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
 
         if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("
@@ -196,15 +210,15 @@ try {
             'fee_status' => $fee_status,
             'payments' => $payments
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'fee_12_month') {
         $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
 
         if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $fee_status = get_student_fee_status($pdo, $student_id);
@@ -248,15 +262,15 @@ try {
             'fee_status' => $fee_status,
             'matrix' => $matrix
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'current_seat') {
         $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
 
         if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("
@@ -273,15 +287,15 @@ try {
             'success' => true,
             'seat' => $seat ?: null
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'current_shift') {
         $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
 
         if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("
@@ -298,15 +312,15 @@ try {
             'success' => true,
             'shift' => $shift ?: null
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'notifications') {
         $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
 
         if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("
@@ -322,7 +336,7 @@ try {
             'success' => true,
             'notifications' => $notifs
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'student_full_summary') {
         $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
@@ -335,9 +349,9 @@ try {
         }
 
         if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         // Student Info
@@ -439,7 +453,7 @@ try {
             'fee_12_month_matrix' => $matrix,
             'notifications' => $notifs
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_chat_messages') {
         $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
@@ -451,9 +465,9 @@ try {
         }
 
         if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $admin_id = (int)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
@@ -479,7 +493,7 @@ try {
             'parent_id' => $parent_id,
             'student_id' => $student_id
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'send_chat_message') {
         $student_id = (int)($_POST['student_id'] ?? ($_GET['student_id'] ?? 0));
@@ -493,14 +507,14 @@ try {
         }
 
         if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         if (empty($msg_text)) {
             echo json_encode(['success' => false, 'message' => 'Message content cannot be empty.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $admin_id = (int)$pdo->query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetchColumn();
@@ -517,7 +531,7 @@ try {
         ")->execute([$msg_text, $admin_id]);
 
         echo json_encode(['success' => true, 'message_id' => $msg_id]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_unread_counts') {
         $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
@@ -548,7 +562,7 @@ try {
             'unread_chat_count' => $unread_chat,
             'unread_notification_count' => $unread_notif
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'complaints') {
         $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
@@ -560,9 +574,9 @@ try {
         }
 
         if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("SELECT * FROM complaints WHERE user_id = ? ORDER BY id DESC");
@@ -573,7 +587,7 @@ try {
             'success' => true,
             'complaints' => $complaints
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'create_complaint') {
         $student_id = (int)($_POST['student_id'] ?? ($_GET['student_id'] ?? 0));
@@ -589,14 +603,14 @@ try {
         }
 
         if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
-            http_response_code(403);
+            safe_http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         if (empty($desc)) {
             echo json_encode(['success' => false, 'message' => 'Complaint description cannot be empty.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("INSERT INTO complaints (user_id, subject, description, category, status) VALUES (?, ?, ?, ?, 'open')");
@@ -606,14 +620,14 @@ try {
             'success' => true,
             'message' => 'Complaint / request submitted successfully to Library Admin.'
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } else {
         echo json_encode(['success' => false, 'message' => 'Invalid action specified.']);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
     }
 } catch (Exception $e) {
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
-    exit();
+    if (defined('IN_TEST_SUITE')) return; else exit();
 }
 ?>

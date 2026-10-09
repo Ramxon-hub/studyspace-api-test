@@ -282,6 +282,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     const SizedBox(height: 10),
 
                     _buildAdminMenuCard(
+                      title: 'Manage Parents & Student Links 🛡️',
+                      subtitle: 'Create parent accounts, link students, reset passwords & view activity',
+                      icon: Icons.family_restroom_rounded,
+                      color: const Color(0xFF6366F1),
+                      onTap: () => Navigator.of(context).pushNamed('/manage_parents'),
+                    ),
+                    const SizedBox(height: 10),
+
+                    _buildAdminMenuCard(
                       title: 'Database Backup & System Health 💾',
                       subtitle: 'Download SQLite database backup file (.sqlite) directly to mobile',
                       icon: Icons.storage_rounded,

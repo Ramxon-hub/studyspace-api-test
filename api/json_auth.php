@@ -1,14 +1,24 @@
 <?php
+
+if (!function_exists('safe_http_response_code')) {
+    function safe_http_response_code($code) {
+        if (!headers_sent()) {
+            @http_response_code($code);
+        }
+    }
+}
 // api/json_auth.php - Mobile REST API for Login and Student Registration
 
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('Content-Type: application/json');
+if (!headers_sent()) {
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+    header('Content-Type: application/json');
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
+    safe_http_response_code(200);
+    if (defined('IN_TEST_SUITE')) return; else exit();
 }
 
 require_once __DIR__ . '/../config/db.php';
@@ -125,7 +135,7 @@ try {
 
         if (empty($name) || empty($email) || empty($phone) || empty($password)) {
             echo json_encode(['success' => false, 'message' => 'All required fields must be filled.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         // Check if email already exists
@@ -133,7 +143,7 @@ try {
         $stmt_check->execute([$email]);
         if ($stmt_check->fetch()) {
             echo json_encode(['success' => false, 'message' => 'This email is already registered.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $hashed = password_hash($password, PASSWORD_DEFAULT);
@@ -161,12 +171,12 @@ try {
             'success' => true,
             'message' => 'Registration request submitted successfully! Admin will assign your seat desk.'
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'get_shifts') {
         $shifts = $pdo->query("SELECT * FROM shifts WHERE is_active = 1")->fetchAll();
         echo json_encode(['success' => true, 'shifts' => $shifts]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'send_login_otp') {
         $phone_or_email = trim($_POST['phone_or_email'] ?? ($_GET['phone_or_email'] ?? ''));
@@ -174,7 +184,7 @@ try {
 
         if (empty($phone_or_email)) {
             echo json_encode(['success' => false, 'message' => 'Please enter registered Student Mobile Phone or Email.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("SELECT * FROM users WHERE phone = ? OR email = ?");
@@ -183,13 +193,13 @@ try {
 
         if (!$user) {
             echo json_encode(['success' => false, 'message' => 'No student account found with this mobile phone or email.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         // Security Enforcement 1: Admin accounts CANNOT use public Phone OTP login
         if ($user['role'] === 'admin') {
             echo json_encode(['success' => false, 'message' => 'Admin Accounts must log in securely using Admin Password.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         // Security Enforcement 2: Hardware Device ID Lockout Verification
@@ -199,7 +209,7 @@ try {
                     'success' => false,
                     'message' => 'Security Lockout 🔒: This account belongs to another registered mobile phone. You cannot log in from a different device!'
                 ]);
-                exit();
+                if (defined('IN_TEST_SUITE')) return; else exit();
             }
             // Bind device ID if unassigned
             if (empty($user['registered_device_id'])) {
@@ -233,7 +243,7 @@ try {
                 'phone' => $masked_phone,
                 'mode' => 'live_sms'
             ]);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         // Local Server Demo Mode (returns OTP for local testing app notification)
@@ -244,7 +254,7 @@ try {
             'otp_code' => $otp,
             'mode' => 'local_demo'
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'verify_login_otp') {
         $phone_or_email = trim($_POST['phone_or_email'] ?? ($_GET['phone_or_email'] ?? ''));
@@ -253,7 +263,7 @@ try {
 
         if (empty($phone_or_email) || empty($otp_code)) {
             echo json_encode(['success' => false, 'message' => 'Please enter both phone/email and OTP code.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         $stmt = $pdo->prepare("SELECT * FROM users WHERE (phone = ? OR email = ?) AND otp_code = ?");
@@ -262,19 +272,19 @@ try {
 
         if (!$user) {
             echo json_encode(['success' => false, 'message' => 'Invalid OTP code. Please check and try again.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         if (!empty($user['otp_expires_at']) && strtotime($user['otp_expires_at']) < time()) {
             echo json_encode(['success' => false, 'message' => 'OTP has expired! Please request a new OTP.']);
-            exit();
+            if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
         // Hardware Device Lockout Check on Verification
         if (!empty($device_id)) {
             if (!empty($user['registered_device_id']) && $user['registered_device_id'] !== $device_id) {
                 echo json_encode(['success' => false, 'message' => 'Security Lockout 🔒: Device mismatch. Access denied!']);
-                exit();
+                if (defined('IN_TEST_SUITE')) return; else exit();
             }
             if (empty($user['registered_device_id'])) {
                 $pdo->prepare("UPDATE users SET registered_device_id = ? WHERE id = ?")->execute([$device_id, $user['id']]);
@@ -329,14 +339,14 @@ try {
                 'shift' => $shift_info
             ]
         ]);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
 
     } else {
         echo json_encode(['success' => false, 'message' => 'Invalid action specified.']);
-        exit();
+        if (defined('IN_TEST_SUITE')) return; else exit();
     }
 } catch (Exception $e) {
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
-    exit();
+    if (defined('IN_TEST_SUITE')) return; else exit();
 }
 ?>

@@ -967,6 +967,161 @@ class ApiService {
     }
   }
 
+  // ================= ADMIN PARENT MANAGEMENT API METHODS ================= //
+  static Future<Map<String, dynamic>> getAdminParents() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonAdmin}?action=get_parents'),
+        headers: defaultHeaders,
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to load parents: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> createAdminParent({
+    required String name,
+    required String email,
+    required String phone,
+    required String password,
+    String relationship = 'Father',
+    String status = 'approved',
+    List<int> studentIds = const [],
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse(ApiConfig.jsonAdmin),
+        headers: defaultHeaders,
+        body: {
+          'action': 'create_parent',
+          'name': name,
+          'email': email,
+          'phone': phone,
+          'password': password,
+          'relationship': relationship,
+          'status': status,
+          'student_ids': jsonEncode(studentIds),
+        },
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to create parent: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> editAdminParent({
+    required int parentId,
+    required String name,
+    required String email,
+    required String phone,
+    required String status,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse(ApiConfig.jsonAdmin),
+        headers: defaultHeaders,
+        body: {
+          'action': 'edit_parent',
+          'parent_id': parentId.toString(),
+          'name': name,
+          'email': email,
+          'phone': phone,
+          'status': status,
+        },
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to update parent details: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> linkParentStudent({
+    required int parentId,
+    required int studentId,
+    String relationship = 'Father',
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse(ApiConfig.jsonAdmin),
+        headers: defaultHeaders,
+        body: {
+          'action': 'link_parent_student',
+          'parent_id': parentId.toString(),
+          'student_id': studentId.toString(),
+          'relationship': relationship,
+        },
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to link student: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> unlinkParentStudent({
+    required int parentId,
+    required int studentId,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse(ApiConfig.jsonAdmin),
+        headers: defaultHeaders,
+        body: {
+          'action': 'unlink_parent_student',
+          'parent_id': parentId.toString(),
+          'student_id': studentId.toString(),
+        },
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to unlink student: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> toggleParentStatus(int parentId) async {
+    try {
+      final response = await http.post(
+        Uri.parse(ApiConfig.jsonAdmin),
+        headers: defaultHeaders,
+        body: {
+          'action': 'toggle_parent_status',
+          'parent_id': parentId.toString(),
+        },
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to toggle status: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> resetParentPassword(int parentId, String newPassword) async {
+    try {
+      final response = await http.post(
+        Uri.parse(ApiConfig.jsonAdmin),
+        headers: defaultHeaders,
+        body: {
+          'action': 'reset_parent_password',
+          'parent_id': parentId.toString(),
+          'new_password': newPassword,
+        },
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to reset password: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> getParentActivity(int parentId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonAdmin}?action=get_parent_activity&parent_id=$parentId'),
+        headers: defaultHeaders,
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to load parent activity: $e'};
+    }
+  }
 
   // ==========================================
   // SUPER ADMIN PLATFORM API SERVICES

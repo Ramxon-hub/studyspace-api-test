@@ -713,6 +713,29 @@ function run_migrations($pdo) {
                         }
                     } catch (Exception $e) {}
                 }
+            ],
+            9 => [
+                'name' => 'add_relationship_to_parent_student_links',
+                'sql' => function($pdo) {
+                    try {
+                        $driver = strtolower((string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME));
+                        if ($driver === 'sqlite') {
+                            $cols = $pdo->query("PRAGMA table_info(parent_student_links)")->fetchAll(PDO::FETCH_ASSOC);
+                            $has_rel = false;
+                            foreach ($cols as $c) {
+                                if ($c['name'] === 'relationship') {
+                                    $has_rel = true;
+                                    break;
+                                }
+                            }
+                            if (!$has_rel) {
+                                $pdo->exec("ALTER TABLE parent_student_links ADD COLUMN relationship VARCHAR(50) DEFAULT 'Father'");
+                            }
+                        } else {
+                            $pdo->exec("ALTER TABLE parent_student_links ADD COLUMN relationship VARCHAR(50) DEFAULT 'Father'");
+                        }
+                    } catch (Exception $e) {}
+                }
             ]
         ];
 
