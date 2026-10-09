@@ -27,9 +27,9 @@ function get_master_db_path() {
     return $dir . '/studyspace_master.sqlite';
 }
 
-function get_master_pdo() {
+function get_master_pdo($force_new = false) {
     static $master_pdo = null;
-    if ($master_pdo !== null) {
+    if ($master_pdo !== null && !$force_new) {
         return $master_pdo;
     }
 

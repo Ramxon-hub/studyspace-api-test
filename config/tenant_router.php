@@ -186,7 +186,12 @@ class TenantDatabaseFactory {
         return $data_dir . '/tenant_' . $lc_code . '.sqlite';
     }
 
-    public static function clearCache() {
+    public static function clearCache($library_code = null) {
+        if ($library_code !== null) {
+            $code = strtoupper(trim((string)$library_code));
+            unset(self::$tenant_connections[$code]);
+            return;
+        }
         foreach (self::$tenant_connections as $code => $pdo) {
             if ($pdo instanceof PDO) {
                 try { $pdo->exec("PRAGMA wal_checkpoint(TRUNCATE);"); } catch (Exception $e) {}
