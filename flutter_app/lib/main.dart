@@ -52,7 +52,7 @@ void main() async {
       "libraryNotifCheck",
       "fetchLibraryNotificationsTask",
       frequency: const Duration(minutes: 15),
-      existingWorkPolicy: ExistingWorkPolicy.replace,
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
       constraints: Constraints(
         networkType: NetworkType.connected,
       ),
@@ -88,7 +88,7 @@ class StudyLibraryApp extends StatelessWidget {
     Widget homeWidget;
     if (TenantConfig.current.isSuperAdmin) {
       homeWidget = const SuperAdminLoginScreen();
-    } else if (!tenantProvider.isLibrarySelected) {
+    } else if (!TenantConfig.current.isSingleTenant && !tenantProvider.isLibrarySelected) {
       homeWidget = const LibrarySelectorScreen();
     } else if (authProvider.isLoggedIn) {
       if (authProvider.currentUser?.role == 'admin') {
@@ -125,7 +125,7 @@ class StudyLibraryApp extends StatelessWidget {
           foregroundColor: Colors.white,
           elevation: 2,
         ),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           color: AppColors.lightCard,
           elevation: 3,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -148,7 +148,7 @@ class StudyLibraryApp extends StatelessWidget {
             borderSide: const BorderSide(color: AppColors.primaryIndigo, width: 2),
           ),
         ),
-        dialogTheme: DialogTheme(
+        dialogTheme: DialogThemeData(
           backgroundColor: Colors.white,
           titleTextStyle: const TextStyle(color: Color(0xFF0F172A), fontSize: 18, fontWeight: FontWeight.bold),
           contentTextStyle: const TextStyle(color: Color(0xFF334155), fontSize: 14),
@@ -185,7 +185,7 @@ class StudyLibraryApp extends StatelessWidget {
           foregroundColor: Colors.white,
           elevation: 2,
         ),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           color: AppColors.darkCard,
           elevation: 3,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -208,7 +208,7 @@ class StudyLibraryApp extends StatelessWidget {
             borderSide: const BorderSide(color: AppColors.accentCyan, width: 2),
           ),
         ),
-        dialogTheme: DialogTheme(
+        dialogTheme: DialogThemeData(
           backgroundColor: AppColors.darkCard,
           titleTextStyle: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
           contentTextStyle: const TextStyle(color: Color(0xFFCBD5E1), fontSize: 14),

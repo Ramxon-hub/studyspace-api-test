@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../config/api_config.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import 'library_selector_screen.dart';
@@ -438,49 +439,139 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen> {
     final phoneCtrl = TextEditingController(text: lib['phone']?.toString() ?? '');
     final colorCtrl = TextEditingController(text: lib['primary_color']?.toString() ?? '#1D4ED8');
     final logoCtrl = TextEditingController(text: lib['logo_url']?.toString() ?? '');
+    final appIconCtrl = TextEditingController(text: lib['app_icon_url']?.toString() ?? '');
+    bool isUploadingIcon = false;
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text("Edit Branding for $code", style: const TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _dialogTextField(nameCtrl, "LIBRARY NAME"),
-            const SizedBox(height: 10),
-            _dialogTextField(taglineCtrl, "TAGLINE / SUBTITLE"),
-            const SizedBox(height: 10),
-            _dialogTextField(phoneCtrl, "CONTACT PHONE"),
-            const SizedBox(height: 10),
-            _dialogTextField(colorCtrl, "PRIMARY COLOR HEX (#1D4ED8)"),
-            const SizedBox(height: 10),
-            _dialogTextField(logoCtrl, "LOGO URL"),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text("Edit Branding & App Icon: $code", style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // App Icon Preview & Sync Section
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F172A),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF334155)),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 50,
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E293B),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF475569)),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: appIconCtrl.text.isNotEmpty
+                              ? Image.network(
+                                  appIconCtrl.text.startsWith('http')
+                                      ? appIconCtrl.text
+                                      : '${ApiConfig.baseUrl}/${appIconCtrl.text}',
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_rounded, color: Colors.orange, size: 26),
+                                )
+                              : const Icon(Icons.apps_rounded, color: Color(0xFF38BDF8), size: 28),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                "Launcher App Icon",
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                appIconCtrl.text.isNotEmpty ? "Custom Icon URL Set" : "Default Flavor Icon",
+                                style: TextStyle(
+                                  color: appIconCtrl.text.isNotEmpty ? const Color(0xFF34D399) : const Color(0xFF94A3B8),
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (isUploadingIcon)
+                          const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        else
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF7C3AED),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                            ),
+                            onPressed: () async {
+                              setDialogState(() => isUploadingIcon = true);
+                              final syncRes = await ApiService.superAdminCall('sync_apk_launcher_icons');
+                              setDialogState(() => isUploadingIcon = false);
+                              if (syncRes['success'] == true) {
+                                _showToast("Launcher icons synchronized across flavors!", isError: false);
+                              } else {
+                                _showToast(syncRes['error'] ?? "Icon sync failed", isError: true);
+                              }
+                            },
+                            child: const Text("Sync Icons"),
+                          ),
+                      ],
+                    ),
+                  ),
+
+                  _dialogTextField(nameCtrl, "LIBRARY NAME"),
+                  const SizedBox(height: 10),
+                  _dialogTextField(taglineCtrl, "TAGLINE / SUBTITLE"),
+                  const SizedBox(height: 10),
+                  _dialogTextField(phoneCtrl, "CONTACT PHONE"),
+                  const SizedBox(height: 10),
+                  _dialogTextField(colorCtrl, "PRIMARY COLOR HEX (#1D4ED8)"),
+                  const SizedBox(height: 10),
+                  _dialogTextField(logoCtrl, "LOGO URL"),
+                  const SizedBox(height: 10),
+                  _dialogTextField(appIconCtrl, "APP ICON URL / PATH", hint: "uploads/icons/lib001_icon.png"),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3B82F6)),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final res = await ApiService.superAdminCall('update_library', {
+                  'library_code': code,
+                  'name': nameCtrl.text.trim(),
+                  'phone': phoneCtrl.text.trim(),
+                  'tagline': taglineCtrl.text.trim(),
+                  'primary_color': colorCtrl.text.trim(),
+                  'logo_url': logoCtrl.text.trim(),
+                  'app_icon_url': appIconCtrl.text.trim(),
+                });
+                if (res['success'] == true && mounted) {
+                  _showToast("Branding & icon updated for $code!", isError: false);
+                  _loadAllData();
+                } else if (mounted) {
+                  _showToast(res['error'] ?? "Failed to update branding.", isError: true);
+                }
+              },
+              child: const Text("Save Branding"),
+            ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3B82F6)),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final res = await ApiService.superAdminCall('update_library', {
-                'library_code': code,
-                'name': nameCtrl.text.trim(),
-                'phone': phoneCtrl.text.trim(),
-                'tagline': taglineCtrl.text.trim(),
-                'primary_color': colorCtrl.text.trim(),
-                'logo_url': logoCtrl.text.trim(),
-              });
-              if (res['success'] == true && mounted) {
-                _showToast("Branding updated for $code!", isError: false);
-                _loadAllData();
-              }
-            },
-            child: const Text("Save Branding"),
-          ),
-        ],
       ),
     );
   }
@@ -1264,17 +1355,32 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen> {
       itemBuilder: (context, idx) {
         final lib = _libraries[idx] as Map<String, dynamic>;
         final code = lib['library_code'].toString();
+        final appIconUrl = lib['app_icon_url']?.toString();
 
         return Card(
           color: const Color(0xFF1E293B),
           margin: const EdgeInsets.only(bottom: 12),
           child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: const Color(0xFF7C3AED),
-              child: Text(code.substring(0, code.length > 3 ? 3 : code.length), style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-            ),
+            leading: (appIconUrl != null && appIconUrl.isNotEmpty)
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      appIconUrl.startsWith('http') ? appIconUrl : '${ApiConfig.baseUrl}/$appIconUrl',
+                      width: 42,
+                      height: 42,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => CircleAvatar(
+                        backgroundColor: const Color(0xFF7C3AED),
+                        child: Text(code.substring(0, code.length > 3 ? 3 : code.length), style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  )
+                : CircleAvatar(
+                    backgroundColor: const Color(0xFF7C3AED),
+                    child: Text(code.substring(0, code.length > 3 ? 3 : code.length), style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
             title: Text(lib['name']?.toString() ?? '', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            subtitle: Text("Tagline: ${lib['tagline'] ?? 'Self Study Hall'} | Color: ${lib['primary_color'] ?? '#1D4ED8'}", style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+            subtitle: Text("Tagline: ${lib['tagline'] ?? 'Self Study Hall'} | Color: ${lib['primary_color'] ?? '#1D4ED8'}\nApp Icon: ${appIconUrl != null && appIconUrl.isNotEmpty ? appIconUrl : 'Default APK Icon'}", style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
             trailing: ElevatedButton.icon(
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3B82F6)),
               onPressed: () => _showEditBrandingDialog(lib),

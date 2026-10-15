@@ -149,6 +149,7 @@ function init_master_database($master_pdo) {
         id $pk_type,
         library_code VARCHAR(50) NOT NULL UNIQUE,
         logo_url TEXT,
+        app_icon_url TEXT,
         primary_color VARCHAR(20) DEFAULT '#1D4ED8',
         contact_phone VARCHAR(50),
         address TEXT,
@@ -293,6 +294,11 @@ function init_master_database($master_pdo) {
         created_at $dt_type DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (library_code) REFERENCES libraries(library_code) ON DELETE CASCADE
     )");
+
+    // Migration for library_branding.app_icon_url
+    try {
+        $master_pdo->exec("ALTER TABLE library_branding ADD COLUMN app_icon_url TEXT");
+    } catch (Exception $e) {}
 
     // Seed Default Support Settings if empty
     $supp_count = (int)$master_pdo->query("SELECT COUNT(*) FROM support_settings")->fetchColumn();

@@ -25,7 +25,7 @@ try {
     if (isset($_GET['list']) || $action === 'list' || $code === 'ALL') {
         $stmt = $master_pdo->query("
             SELECT l.library_code as code, l.name, l.status,
-                   b.logo_url, b.primary_color, b.contact_phone as phone, b.address, b.tagline
+                   b.logo_url, b.app_icon_url, b.primary_color, b.contact_phone as phone, b.address, b.tagline
             FROM libraries l
             LEFT JOIN library_branding b ON l.library_code = b.library_code
             WHERE l.status = 'active'
@@ -38,7 +38,7 @@ try {
 
     $stmt = $master_pdo->prepare("
         SELECT l.library_code, l.name, l.status,
-               b.logo_url, b.primary_color, b.contact_phone, b.address, b.tagline,
+               b.logo_url, b.app_icon_url, b.primary_color, b.contact_phone, b.address, b.tagline,
                s.plan_name, s.valid_until, s.status as sub_status
         FROM libraries l
         LEFT JOIN library_branding b ON l.library_code = b.library_code
@@ -76,6 +76,7 @@ try {
             'status' => $info['status'],
             'tagline' => $info['tagline'] ?? 'Self Study Hall',
             'logo_url' => $info['logo_url'] ?? '',
+            'app_icon_url' => $info['app_icon_url'] ?? '',
             'primary_color' => $info['primary_color'] ?? '#1D4ED8',
             'phone' => $info['contact_phone'] ?? '',
             'address' => $info['address'] ?? '',

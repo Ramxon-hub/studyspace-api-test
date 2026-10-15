@@ -182,7 +182,7 @@ try {
                    l.status, l.provisioning_status, l.provisioning_error, l.db_connection_status,
                    l.schema_version, l.last_connection_check, l.last_provisioning_attempt, l.created_at,
                    s.plan_name, s.max_students, s.valid_until, s.status as sub_status,
-                   b.logo_url, b.primary_color, b.contact_phone, b.address as branding_address, b.tagline,
+                   b.logo_url, b.app_icon_url, b.primary_color, b.contact_phone, b.address as branding_address, b.tagline,
                    c.db_driver, c.db_file, c.db_host, c.db_name
             FROM libraries l
             LEFT JOIN subscriptions s ON l.library_code = s.library_code
@@ -231,7 +231,7 @@ try {
                    l.status, l.provisioning_status, l.provisioning_error, l.db_connection_status,
                    l.schema_version, l.last_connection_check, l.last_provisioning_attempt, l.created_at,
                    s.plan_name, s.max_students, s.valid_until, s.status as sub_status,
-                   b.logo_url, b.primary_color, b.contact_phone, b.address as branding_address, b.tagline,
+                   b.logo_url, b.app_icon_url, b.primary_color, b.contact_phone, b.address as branding_address, b.tagline,
                    c.db_driver, c.db_file, c.db_host, c.db_name
             FROM libraries l
             LEFT JOIN subscriptions s ON l.library_code = s.library_code
@@ -400,30 +400,197 @@ try {
         }
 
         // Update Branding if provided
-        if (isset($_POST['tagline']) || isset($_POST['primary_color']) || isset($_POST['logo_url'])) {
-            $stmt_b = $master_pdo->prepare("SELECT logo_url, primary_color, tagline FROM library_branding WHERE library_code = ?");
+        if (isset($_POST['tagline']) || isset($_POST['primary_color']) || isset($_POST['logo_url']) || isset($_POST['app_icon_url'])) {
+            $stmt_b = $master_pdo->prepare("SELECT logo_url, app_icon_url, primary_color, tagline FROM library_branding WHERE library_code = ?");
             $stmt_b->execute([$code]);
             $existing_b = $stmt_b->fetch(PDO::FETCH_ASSOC) ?: [];
 
             $tagline = isset($_POST['tagline']) && trim($_POST['tagline']) !== '' ? trim($_POST['tagline']) : ($existing_b['tagline'] ?? 'Self Study Hall');
             $primary_color = isset($_POST['primary_color']) && trim($_POST['primary_color']) !== '' ? trim($_POST['primary_color']) : ($existing_b['primary_color'] ?? '#1D4ED8');
             $logo_url = isset($_POST['logo_url']) && trim($_POST['logo_url']) !== '' ? trim($_POST['logo_url']) : ($existing_b['logo_url'] ?? '');
+            $app_icon_url = isset($_POST['app_icon_url']) && trim($_POST['app_icon_url']) !== '' ? trim($_POST['app_icon_url']) : ($existing_b['app_icon_url'] ?? '');
 
             $master_pdo->prepare("
-                INSERT INTO library_branding (library_code, logo_url, primary_color, contact_phone, address, tagline)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO library_branding (library_code, logo_url, app_icon_url, primary_color, contact_phone, address, tagline)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (library_code) DO UPDATE SET
                     logo_url = EXCLUDED.logo_url,
+                    app_icon_url = EXCLUDED.app_icon_url,
                     primary_color = EXCLUDED.primary_color,
                     contact_phone = EXCLUDED.contact_phone,
                     address = EXCLUDED.address,
                     tagline = EXCLUDED.tagline
-            ")->execute([$code, $logo_url, $primary_color, $phone, $address, $tagline]);
+            ")->execute([$code, $logo_url, $app_icon_url, $primary_color, $phone, $address, $tagline]);
         }
 
         log_super_admin_action($master_pdo, 'library_updated', $super_admin_user, $code, 'SUCCESS', ['updated_fields' => array_keys($_POST)]);
 
         echo json_encode(['success' => true, 'message' => "Library $code updated successfully."]);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+
+    } elseif ($action === 'upload_app_icon') {
+        $code = strtoupper(trim($_POST['library_code'] ?? ''));
+        if (empty($code)) {
+            safe_http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Library code is required.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        // Verify library exists
+        $stmt_chk = $master_pdo->prepare("SELECT id, name FROM libraries WHERE library_code = ?");
+        $stmt_chk->execute([$code]);
+        $lib_chk = $stmt_chk->fetch(PDO::FETCH_ASSOC);
+        if (!$lib_chk) {
+            safe_http_response_code(404);
+            echo json_encode(['success' => false, 'error' => "Library code not found: $code"]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $upload_dir = realpath(__DIR__ . '/../uploads/icons') ?: (__DIR__ . '/../uploads/icons');
+        if (!file_exists($upload_dir)) {
+            @mkdir($upload_dir, 0777, true);
+        }
+        @chmod($upload_dir, 0777);
+
+        $temp_file = null;
+        $orig_ext = 'png';
+
+        if (isset($_FILES['icon_file']) && is_array($_FILES['icon_file']) && ($_FILES['icon_file']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+            $file = $_FILES['icon_file'];
+            if ($file['size'] > 5 * 1024 * 1024) {
+                safe_http_response_code(400);
+                echo json_encode(['success' => false, 'error' => 'App icon file size exceeds 5MB limit.']);
+                if (defined('IN_TEST_SUITE')) return; else exit();
+            }
+            $temp_file = $file['tmp_name'];
+            $orig_ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        } elseif (!empty($_POST['icon_base64']) || !empty($_POST['icon_data'])) {
+            $raw_b64 = trim($_POST['icon_base64'] ?? $_POST['icon_data']);
+            if (preg_match('/^data:image\/(\w+);base64,/', $raw_b64, $m)) {
+                $orig_ext = strtolower($m[1]);
+                $raw_b64 = substr($raw_b64, strpos($raw_b64, ',') + 1);
+            }
+            $decoded = base64_decode($raw_b64, true);
+            if ($decoded === false || strlen($decoded) < 16) {
+                safe_http_response_code(400);
+                echo json_encode(['success' => false, 'error' => 'Invalid base64 icon data provided.']);
+                if (defined('IN_TEST_SUITE')) return; else exit();
+            }
+            if (strlen($decoded) > 5 * 1024 * 1024) {
+                safe_http_response_code(400);
+                echo json_encode(['success' => false, 'error' => 'App icon size exceeds 5MB limit.']);
+                if (defined('IN_TEST_SUITE')) return; else exit();
+            }
+            $temp_file = tempnam(sys_get_temp_dir(), 'ss_icon_');
+            file_put_contents($temp_file, $decoded);
+        } else {
+            safe_http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'No icon file or base64 data uploaded.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        // Validate MIME type via finfo
+        $allowed_mimes = ['image/png', 'image/jpeg', 'image/webp'];
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($finfo, $temp_file);
+        @finfo_close($finfo);
+
+        if (!in_array($mime, $allowed_mimes)) {
+            if (file_exists($temp_file) && strpos($temp_file, sys_get_temp_dir()) !== false) @unlink($temp_file);
+            safe_http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Invalid image MIME type: ' . $mime . '. Allowed formats: PNG, JPEG, WEBP.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        // Validate actual image dimensions & integrity via getimagesize
+        $img_info = @getimagesize($temp_file);
+        if ($img_info === false) {
+            if (file_exists($temp_file) && strpos($temp_file, sys_get_temp_dir()) !== false) @unlink($temp_file);
+            safe_http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Corrupt or unreadable image file content.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $width = $img_info[0];
+        $height = $img_info[1];
+        if ($width < 32 || $height < 32 || $width > 4096 || $height > 4096) {
+            if (file_exists($temp_file) && strpos($temp_file, sys_get_temp_dir()) !== false) @unlink($temp_file);
+            safe_http_response_code(400);
+            echo json_encode(['success' => false, 'error' => "Image dimensions {$width}x{$height} invalid. Minimum 32x32, maximum 4096x4096."]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        // Determine safe extension
+        $ext = 'png';
+        if ($mime === 'image/jpeg') $ext = 'jpg';
+        elseif ($mime === 'image/webp') $ext = 'webp';
+
+        $safe_code = preg_replace('/[^A-Z0-9_-]/', '', $code);
+        $filename = 'icon_' . strtolower($safe_code) . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+        $dest_path = $upload_dir . '/' . $filename;
+
+        if (is_uploaded_file($temp_file)) {
+            move_uploaded_file($temp_file, $dest_path);
+        } else {
+            copy($temp_file, $dest_path);
+            if (file_exists($temp_file) && strpos($temp_file, sys_get_temp_dir()) !== false) @unlink($temp_file);
+        }
+        @chmod($dest_path, 0666);
+
+        $base_url = env_get('API_BASE_URL', 'https://studyspace-api-test.de.deplexo.com');
+        $icon_url = $base_url . '/uploads/icons/' . $filename;
+
+        // Persist to library_branding strictly for this library_code
+        $stmt_upd = $master_pdo->prepare("
+            INSERT INTO library_branding (library_code, app_icon_url)
+            VALUES (?, ?)
+            ON CONFLICT (library_code) DO UPDATE SET
+                app_icon_url = EXCLUDED.app_icon_url
+        ");
+        $stmt_upd->execute([$code, $icon_url]);
+
+        log_super_admin_action($master_pdo, 'library_app_icon_uploaded', $super_admin_user, $code, 'SUCCESS', [
+            'icon_url' => $icon_url,
+            'filename' => $filename,
+            'mime' => $mime,
+            'width' => $width,
+            'height' => $height
+        ]);
+
+        echo json_encode([
+            'success' => true,
+            'message' => "App icon uploaded and saved successfully for $code.",
+            'library_code' => $code,
+            'app_icon_url' => $icon_url,
+            'dimensions' => ['width' => $width, 'height' => $height]
+        ]);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+
+    } elseif ($action === 'get_library_branding') {
+        $code = strtoupper(trim($_GET['library_code'] ?? ($_POST['library_code'] ?? '')));
+        if (empty($code)) {
+            safe_http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Library code is required.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $stmt = $master_pdo->prepare("
+            SELECT l.library_code, l.name, l.status,
+                   b.logo_url, b.app_icon_url, b.primary_color, b.contact_phone, b.address, b.tagline
+            FROM libraries l
+            LEFT JOIN library_branding b ON l.library_code = b.library_code
+            WHERE l.library_code = ?
+        ");
+        $stmt->execute([$code]);
+        $branding = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$branding) {
+            safe_http_response_code(404);
+            echo json_encode(['success' => false, 'error' => "Library code not found: $code"]);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        echo json_encode(['success' => true, 'branding' => $branding]);
         if (defined('IN_TEST_SUITE')) return; else exit();
 
     } elseif ($action === 'activate_library') {
@@ -1751,6 +1918,7 @@ try {
             'tagline' => $lib['tagline'] ?? 'Self Study Hall',
             'primary_color' => $lib['primary_color'] ?? '#1D4ED8',
             'logo_url' => $lib['logo_url'] ?? '',
+            'app_icon_url' => $lib['app_icon_url'] ?? '',
             'api_base_url' => $api_base_url,
             'json_auth_endpoint' => $api_base_url . '/api/json_auth.php',
             'json_tenant_endpoint' => $api_base_url . '/api/json_tenant.php?code=' . $code,
@@ -1771,6 +1939,17 @@ try {
             'success' => true,
             'message' => "APK build configuration for library $code generated successfully.",
             'build_config' => $build_config
+        ]);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+
+    } elseif ($action === 'sync_apk_launcher_icons') {
+        require_once __DIR__ . '/../tools/sync_flavor_icons.php';
+        $sync_results = sync_all_flavor_launcher_icons($master_pdo);
+        log_super_admin_action($master_pdo, 'APK_LAUNCHER_ICONS_SYNCED', $super_admin_user, null, 'SUCCESS', $sync_results);
+        echo json_encode([
+            'success' => true,
+            'message' => 'Launcher icons synchronized across all Android flavor resource directories.',
+            'sync_results' => $sync_results
         ]);
         if (defined('IN_TEST_SUITE')) return; else exit();
 

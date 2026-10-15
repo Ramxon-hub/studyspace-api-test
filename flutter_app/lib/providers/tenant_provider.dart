@@ -10,6 +10,7 @@ class TenantModel {
   final String status;
   final String tagline;
   final String logoUrl;
+  final String appIconUrl;
   final Color primaryColor;
   final String phone;
   final String address;
@@ -22,6 +23,7 @@ class TenantModel {
     required this.status,
     required this.tagline,
     required this.logoUrl,
+    this.appIconUrl = '',
     required this.primaryColor,
     required this.phone,
     required this.address,
@@ -45,6 +47,7 @@ class TenantModel {
       status: (json['status'] ?? 'active').toString(),
       tagline: (json['tagline'] ?? 'Self Study Hall').toString(),
       logoUrl: (json['logo_url'] ?? '').toString(),
+      appIconUrl: (json['app_icon_url'] ?? '').toString(),
       primaryColor: parsedColor,
       phone: (json['phone'] ?? json['contact_phone'] ?? '').toString(),
       address: (json['address'] ?? '').toString(),
@@ -59,6 +62,7 @@ class TenantModel {
     'status': status,
     'tagline': tagline,
     'logo_url': logoUrl,
+    'app_icon_url': appIconUrl,
     'primary_color': '#${primaryColor.value.toRadixString(16).substring(2).toUpperCase()}',
     'phone': phone,
     'address': address,
@@ -77,31 +81,41 @@ class TenantProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
-  String get activeLibraryCode => _currentTenant?.code ?? 'LIB001';
-  String get activeLibraryName => _currentTenant?.name ?? 'StudySpace Library';
-  String get activeTagline => _currentTenant?.tagline ?? 'Self Study Hall';
-  Color get activePrimaryColor => _currentTenant?.primaryColor ?? const Color(0xFF1D4ED8);
+  String get activeLibraryCode => _currentTenant?.code ?? (TenantConfig.current.isSingleTenant ? TenantConfig.current.tenantCode : 'LIB001');
+  String get activeLibraryName => _currentTenant?.name ?? (TenantConfig.current.isSingleTenant ? TenantConfig.current.libraryName : 'StudySpace Library');
+  String get activeTagline => _currentTenant?.tagline ?? (TenantConfig.current.isSingleTenant ? TenantConfig.current.libraryTagline : 'Self Study Hall');
+  Color get activePrimaryColor => _currentTenant?.primaryColor ?? (TenantConfig.current.isSingleTenant ? TenantConfig.current.primaryColor : const Color(0xFF1D4ED8));
+  String get activeAppIconUrl => _currentTenant?.appIconUrl ?? '';
 
   TenantProvider() {
+    if (TenantConfig.current.isSingleTenant) {
+      _currentTenant = TenantModel(
+        code: TenantConfig.current.tenantCode,
+        name: TenantConfig.current.libraryName,
+        status: 'active',
+        tagline: TenantConfig.current.libraryTagline,
+        logoUrl: '',
+        appIconUrl: '',
+        primaryColor: TenantConfig.current.primaryColor,
+        phone: TenantConfig.current.libraryPhone,
+        address: TenantConfig.current.libraryAddress,
+        planName: 'Standard',
+      );
+      ApiService.activeLibraryCode = _currentTenant!.code;
+    }
     loadSavedTenant();
   }
 
   Future<void> loadSavedTenant() async {
     try {
       if (TenantConfig.current.isSingleTenant) {
-        _currentTenant = TenantModel(
-          code: TenantConfig.current.tenantCode,
-          name: TenantConfig.current.libraryName,
-          status: 'active',
-          tagline: TenantConfig.current.libraryTagline,
-          logoUrl: '',
-          primaryColor: TenantConfig.current.primaryColor,
-          phone: TenantConfig.current.libraryPhone,
-          address: TenantConfig.current.libraryAddress,
-          planName: 'Standard',
-        );
-        ApiService.activeLibraryCode = _currentTenant!.code;
-        notifyListeners();
+        // Dynamically refresh branding from server for the dedicated tenant code
+        final res = await ApiService.getTenantInfo(TenantConfig.current.tenantCode);
+        if (res['success'] == true && res['library'] != null) {
+          _currentTenant = TenantModel.fromJson(res['library']);
+          ApiService.activeLibraryCode = _currentTenant!.code;
+          notifyListeners();
+        }
         return;
       }
 
@@ -128,6 +142,13 @@ class TenantProvider with ChangeNotifier {
     if (cleanedCode.isEmpty) {
       _isLoading = false;
       _errorMessage = "Please enter a valid library code (e.g. LIB001)";
+      notifyListeners();
+      return false;
+    }
+
+    if (TenantConfig.current.isSingleTenant && cleanedCode != TenantConfig.current.tenantCode) {
+      _isLoading = false;
+      _errorMessage = "This dedicated app build is locked to ${TenantConfig.current.tenantCode}.";
       notifyListeners();
       return false;
     }
@@ -176,6 +197,11 @@ class TenantProvider with ChangeNotifier {
   }
 
   Future<void> changeLibrary() async {
+    if (TenantConfig.current.isSingleTenant) {
+      // In dedicated single-tenant builds, library switching is strictly disabled.
+      return;
+    }
+
     _currentTenant = null;
     _errorMessage = null;
     ApiService.activeLibraryCode = 'LIB001';
