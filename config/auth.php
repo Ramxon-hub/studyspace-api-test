@@ -317,4 +317,246 @@ function get_student_fee_status($pdo, $allocation_id_or_user_id, $start_date = n
         }
     }
 }
+
+/**
+ * Computes full-day in/out attendance timeline for a student on a specific date.
+ * Accurately tracks multiple entry/exit cycles, total duration, current inside/outside status.
+ */
+function compute_student_day_timeline($pdo, $student_id, $target_date = null) {
+    if (empty($target_date)) {
+        $target_date = date('Y-m-d');
+    }
+
+    $student_id = (int)$student_id;
+
+    // 1. Fetch all discrete events from attendance_events
+    $stmt = $pdo->prepare("
+        SELECT id, user_id, event_date, event_time, event_type, source, notes, created_at
+        FROM attendance_events
+        WHERE user_id = ? AND event_date = ?
+        ORDER BY event_time ASC, id ASC
+    ");
+    $stmt->execute([$student_id, $target_date]);
+    $events = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // 2. Backward-compatible fallback to legacy attendance table if no attendance_events exist
+    if (empty($events)) {
+        $stmt_att = $pdo->prepare("SELECT * FROM attendance WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
+        $stmt_att->execute([$student_id, $target_date]);
+        $legacy = $stmt_att->fetch(PDO::FETCH_ASSOC);
+        if ($legacy && !empty($legacy['check_in_time'])) {
+            $events[] = [
+                'id' => 0,
+                'user_id' => $student_id,
+                'event_date' => $target_date,
+                'event_time' => $legacy['check_in_time'],
+                'event_type' => 'CHECK_IN',
+                'source' => 'LEGACY',
+                'notes' => 'Recorded attendance session'
+            ];
+            if (!empty($legacy['check_out_time'])) {
+                $events[] = [
+                    'id' => 0,
+                    'user_id' => $student_id,
+                    'event_date' => $target_date,
+                    'event_time' => $legacy['check_out_time'],
+                    'event_type' => 'CHECK_OUT',
+                    'source' => 'LEGACY',
+                    'notes' => 'Recorded attendance session'
+                ];
+            }
+        }
+    }
+
+    $formatted_events = [];
+    $check_in_count = 0;
+    $check_out_count = 0;
+    $total_inside_seconds = 0;
+    $open_check_in_ts = null;
+    $first_arrival = null;
+    $final_exit = null;
+    $incomplete_pairs = false;
+
+    $status_note = '';
+
+    foreach ($events as $ev) {
+        $type = strtoupper($ev['event_type']);
+        $raw_time = $ev['event_time'];
+        $event_ts = (strpos($raw_time, '-') !== false) ? strtotime($raw_time) : strtotime($target_date . ' ' . $raw_time);
+        $time_str = date('H:i:s', $event_ts);
+
+        if ($type === 'CHECK_IN') {
+            $check_in_count++;
+            if ($first_arrival === null) {
+                $first_arrival = $time_str;
+            }
+            if ($open_check_in_ts !== null) {
+                // Consecutive check-in without an exit: mark incomplete pair
+                $incomplete_pairs = true;
+            }
+            $open_check_in_ts = $event_ts;
+
+            $label = ($check_in_count === 1) ? 'First Arrival (Check-In)' : 'Re-Entry #' . ($check_in_count - 1);
+            $formatted_events[] = [
+                'id' => (int)$ev['id'],
+                'event_date' => $target_date,
+                'event_time' => $time_str,
+                'time_formatted' => date('h:i A', $event_ts),
+                'event_type' => 'CHECK_IN',
+                'event_label' => $label,
+                'source' => $ev['source'] ?? 'SELF',
+                'notes' => $ev['notes'] ?? ''
+            ];
+        } elseif ($type === 'CHECK_OUT') {
+            $check_out_count++;
+            $final_exit = $time_str;
+            if ($open_check_in_ts !== null) {
+                $duration = $event_ts - $open_check_in_ts;
+                if ($duration > 0) {
+                    $total_inside_seconds += $duration;
+                }
+                $open_check_in_ts = null;
+            } else {
+                // Checkout without prior check-in: mark incomplete pair
+                $incomplete_pairs = true;
+            }
+
+            $label = 'Exit / Step-Out #' . $check_out_count;
+            $formatted_events[] = [
+                'id' => (int)$ev['id'],
+                'event_date' => $target_date,
+                'event_time' => $time_str,
+                'time_formatted' => date('h:i A', $event_ts),
+                'event_type' => 'CHECK_OUT',
+                'event_label' => $label,
+                'source' => $ev['source'] ?? 'SELF',
+                'notes' => $ev['notes'] ?? ''
+            ];
+        }
+    }
+
+    // Determine current status
+    $current_status = 'NOT_CHECKED_IN';
+    $status_label = 'Not Checked In';
+
+    if (!empty($events)) {
+        $last_ev = end($events);
+        if (strtoupper($last_ev['event_type']) === 'CHECK_IN') {
+            $current_status = 'INSIDE_LIBRARY';
+            $status_label = 'Inside Library';
+            // Student is currently inside: calculate duration up to current time if target_date is today
+            if ($target_date === date('Y-m-d') && $open_check_in_ts !== null) {
+                $cur_ts = time();
+                if ($cur_ts > $open_check_in_ts) {
+                    $total_inside_seconds += ($cur_ts - $open_check_in_ts);
+                }
+            } elseif ($open_check_in_ts !== null) {
+                // Unclosed session on past day
+                $incomplete_pairs = true;
+                $status_note = 'Student checked in but did not log check-out before day ended.';
+            }
+        } else {
+            $current_status = 'OUTSIDE_LIBRARY';
+            $status_label = 'Outside Library';
+        }
+    }
+
+    $hrs = floor($total_inside_seconds / 3600);
+    $mins = floor(($total_inside_seconds % 3600) / 60);
+    $total_inside_formatted = ($hrs > 0) ? "{$hrs}h {$mins}m" : "{$mins}m";
+    if ($total_inside_seconds == 0 && empty($events)) {
+        $total_inside_formatted = "0m";
+    }
+
+    return [
+        'date' => $target_date,
+        'current_status' => $current_status,
+        'status_label' => $status_label,
+        'status_note' => $status_note,
+        'first_arrival' => $first_arrival ? date('h:i A', strtotime($target_date . ' ' . $first_arrival)) : null,
+        'first_arrival_formatted' => $first_arrival ? date('h:i A', strtotime($target_date . ' ' . $first_arrival)) : null,
+        'final_exit' => ($current_status === 'OUTSIDE_LIBRARY' && $final_exit) ? date('h:i A', strtotime($target_date . ' ' . $final_exit)) : null,
+        'final_exit_formatted' => ($current_status === 'OUTSIDE_LIBRARY' && $final_exit) ? date('h:i A', strtotime($target_date . ' ' . $final_exit)) : null,
+        'total_inside_seconds' => (int)$total_inside_seconds,
+        'total_inside_minutes' => (int)round($total_inside_seconds / 60),
+        'total_inside_formatted' => $total_inside_formatted,
+        'cycles_count' => max($check_in_count, $check_out_count),
+        'exit_count' => $check_out_count,
+        'reentry_count' => max(0, $check_in_count - 1),
+        'incomplete_pairs' => $incomplete_pairs,
+        'total_events' => count($formatted_events),
+        'events_count' => count($formatted_events),
+        'events' => $formatted_events
+    ];
+}
+
+/**
+ * Computes monthly attendance calendar and breakdown with daily timelines
+ */
+function get_student_monthly_attendance_summary($pdo, $student_id, $month = null) {
+    if (empty($month)) {
+        $month = date('Y-m');
+    }
+
+    $student_id = (int)$student_id;
+
+    // Fetch distinct active dates from both attendance_events and attendance
+    $dates = [];
+
+    $stmt1 = $pdo->prepare("SELECT DISTINCT event_date FROM attendance_events WHERE user_id = ? AND event_date LIKE ?");
+    $stmt1->execute([$student_id, $month . '%']);
+    while ($row = $stmt1->fetchColumn()) {
+        $dates[$row] = true;
+    }
+
+    $stmt2 = $pdo->prepare("SELECT DISTINCT date FROM attendance WHERE user_id = ? AND date LIKE ?");
+    $stmt2->execute([$student_id, $month . '%']);
+    while ($row = $stmt2->fetchColumn()) {
+        $dates[$row] = true;
+    }
+
+    $date_keys = array_keys($dates);
+    rsort($date_keys);
+
+    $days = [];
+    $present_count = 0;
+    $partial_count = 0;
+
+    foreach ($date_keys as $dt) {
+        $tl = compute_student_day_timeline($pdo, $student_id, $dt);
+        
+        $day_status = 'present';
+        if ($tl['incomplete_pairs'] || $tl['total_inside_seconds'] < 1800) {
+            $day_status = 'partial';
+            $partial_count++;
+        } else {
+            $present_count++;
+        }
+
+        $days[] = [
+            'date' => $dt,
+            'day_name' => date('D', strtotime($dt)),
+            'day_number' => (int)date('d', strtotime($dt)),
+            'status' => $day_status,
+            'status_label' => ucfirst($day_status),
+            'first_arrival' => $tl['first_arrival_formatted'],
+            'final_exit' => $tl['final_exit_formatted'],
+            'total_inside_formatted' => $tl['total_inside_formatted'],
+            'events_count' => $tl['events_count'],
+            'current_status' => $tl['current_status'],
+            'incomplete_pairs' => $tl['incomplete_pairs'],
+            'timeline' => $tl
+        ];
+    }
+
+    return [
+        'month' => $month,
+        'month_label' => date('F Y', strtotime($month . '-01')),
+        'days_in_month' => (int)date('t', strtotime($month . '-01')),
+        'total_active_days' => count($days),
+        'present_days' => $present_count,
+        'partial_days' => $partial_count,
+        'days' => $days
+    ];
+}
 ?>

@@ -1,5 +1,6 @@
 <?php
 // config/env.php - Centralized Environment Configuration
+date_default_timezone_set('Asia/Kolkata');
 require_once __DIR__ . '/tenant_config.php';
 
 if (file_exists(__DIR__ . '/env_local.php')) {

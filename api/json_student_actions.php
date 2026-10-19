@@ -180,8 +180,20 @@ try {
             exit();
         }
 
-        $stmt_ins = $pdo->prepare("INSERT INTO attendance (user_id, date, check_in_time, status) VALUES (?, ?, ?, 'present')");
-        $stmt_ins->execute([$user_id, $today, $device_time]);
+        // Record attendance event in attendance_events table
+        try {
+            $stmt_ev = $pdo->prepare("INSERT INTO attendance_events (user_id, event_date, event_time, event_type, source, notes) VALUES (?, ?, ?, 'CHECK_IN', 'SELF', 'Student mobile check-in')");
+            $stmt_ev->execute([$user_id, $today, $device_time]);
+        } catch (Exception $e) {}
+
+        if (!$att) {
+            $stmt_ins = $pdo->prepare("INSERT INTO attendance (user_id, date, check_in_time, status) VALUES (?, ?, ?, 'present')");
+            $stmt_ins->execute([$user_id, $today, $device_time]);
+        } else {
+            // Re-entry on the same day: clear check_out_time to indicate currently inside
+            $stmt_upd = $pdo->prepare("UPDATE attendance SET check_out_time = NULL WHERE id = ?");
+            $stmt_upd->execute([$att['id']]);
+        }
 
         echo json_encode(['success' => true, 'message' => 'Check-in successful at ' . $device_time]);
         exit();
@@ -214,6 +226,12 @@ try {
             echo json_encode(['success' => false, 'message' => 'No active check-in session found to check out.']);
             exit();
         }
+
+        $msg_notes = $is_auto ? 'Auto Check-Out (Geofence)' : 'Student manual check-out';
+        try {
+            $stmt_ev = $pdo->prepare("INSERT INTO attendance_events (user_id, event_date, event_time, event_type, source, notes) VALUES (?, ?, ?, 'CHECK_OUT', 'SELF', ?)");
+            $stmt_ev->execute([$user_id, $today, $device_time, $msg_notes]);
+        } catch (Exception $e) {}
 
         $stmt_upd = $pdo->prepare("UPDATE attendance SET check_out_time = ? WHERE id = ?");
         $stmt_upd->execute([$device_time, $att['id']]);

@@ -142,6 +142,7 @@ try {
                 'check_in_time' => null,
                 'check_out_time' => null
             ],
+            'today_timeline' => compute_student_day_timeline($pdo, $student_id, $today),
             'fee_status' => $fee_status
         ]);
         if (defined('IN_TEST_SUITE')) return; else exit();
@@ -182,6 +183,61 @@ try {
             'present_count' => $present_count,
             'absent_count' => $absent_count,
             'records' => $records
+        ]);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+
+    } elseif ($action === 'get_today_timeline' || $action === 'today_timeline') {
+        $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
+        $date = trim($_GET['date'] ?? ($_POST['date'] ?? date('Y-m-d')));
+
+        if ($student_id <= 0) {
+            $linked = get_parent_linked_students($pdo, $parent_id);
+            if (!empty($linked)) {
+                $student_id = (int)$linked[0]['id'];
+            }
+        }
+
+        if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
+            safe_http_response_code(403);
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $timeline = compute_student_day_timeline($pdo, $student_id, $date);
+
+        echo json_encode([
+            'success' => true,
+            'student_id' => $student_id,
+            'date' => $date,
+            'timeline' => $timeline
+        ]);
+        if (defined('IN_TEST_SUITE')) return; else exit();
+
+    } elseif ($action === 'get_monthly_attendance_summary' || $action === 'monthly_attendance_summary') {
+        $student_id = (int)($_GET['student_id'] ?? ($_POST['student_id'] ?? 0));
+        $month = trim($_GET['month'] ?? ($_POST['month'] ?? date('Y-m')));
+
+        if ($student_id <= 0) {
+            $linked = get_parent_linked_students($pdo, $parent_id);
+            if (!empty($linked)) {
+                $student_id = (int)$linked[0]['id'];
+            }
+        }
+
+        if ($student_id <= 0 || !verify_parent_student_access($pdo, $parent_id, $student_id)) {
+            safe_http_response_code(403);
+            echo json_encode(['success' => false, 'message' => 'Unauthorized: Student record does not belong to your parent account.']);
+            if (defined('IN_TEST_SUITE')) return; else exit();
+        }
+
+        $summary = get_student_monthly_attendance_summary($pdo, $student_id, $month);
+
+        echo json_encode([
+            'success' => true,
+            'student_id' => $student_id,
+            'month' => $month,
+            'summary' => $summary,
+            'attendance_summary' => $summary
         ]);
         if (defined('IN_TEST_SUITE')) return; else exit();
 
@@ -444,6 +500,7 @@ try {
                 'check_in_time' => null,
                 'check_out_time' => null
             ],
+            'today_timeline' => compute_student_day_timeline($pdo, $student_id, $today),
             'month_attendance_summary' => [
                 'month' => $cur_month,
                 'total_days_marked' => count($month_atts),

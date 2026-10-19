@@ -865,6 +865,36 @@ class ApiService {
     }
   }
 
+  // Get Today's Full-Day Attendance In/Out Timeline for Linked Student
+  static Future<Map<String, dynamic>> getParentTodayTimeline(int studentId, {int? parentId, String? date}) async {
+    try {
+      final dateParam = date != null && date.isNotEmpty ? '&date=$date' : '';
+      final pParam = parentId != null && parentId > 0 ? '&parent_id=$parentId' : '';
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonParent}?action=get_today_timeline&student_id=$studentId$dateParam$pParam'),
+        headers: parentId != null ? {'X-Parent-Id': parentId.toString(), ...defaultHeaders} : defaultHeaders,
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to load attendance timeline: $e'};
+    }
+  }
+
+  // Get Monthly Attendance Summary with day-by-day status
+  static Future<Map<String, dynamic>> getParentMonthlyAttendanceSummary(int studentId, {int? parentId, String? month}) async {
+    try {
+      final monthParam = month != null && month.isNotEmpty ? '&month=$month' : '';
+      final pParam = parentId != null && parentId > 0 ? '&parent_id=$parentId' : '';
+      final response = await http.get(
+        Uri.parse('${ApiConfig.jsonParent}?action=get_monthly_attendance_summary&student_id=$studentId$monthParam$pParam'),
+        headers: parentId != null ? {'X-Parent-Id': parentId.toString(), ...defaultHeaders} : defaultHeaders,
+      ).timeout(_timeout);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to load monthly attendance summary: $e'};
+    }
+  }
+
   // Get 12-Month Fee Billing Matrix for Linked Student
   static Future<Map<String, dynamic>> getParentStudent12MonthFees(int studentId, {int? parentId}) async {
     try {

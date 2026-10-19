@@ -216,6 +216,31 @@ try {
         $stmt->execute($params);
         $libraries = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+        foreach ($libraries as &$lib_item) {
+            $c = $lib_item['library_code'];
+            // Latest backup metadata
+            $bk_stmt = $master_pdo->prepare("SELECT backup_id, created_at, file_size, checksum, status FROM backup_metadata WHERE library_code = ? ORDER BY id DESC LIMIT 1");
+            $bk_stmt->execute([$c]);
+            $bk = $bk_stmt->fetch(PDO::FETCH_ASSOC);
+            $lib_item['latest_backup'] = $bk ?: null;
+
+            try {
+                $tp = TenantDatabaseFactory::getTenantConnection($c);
+                $lib_item['total_students'] = (int)$tp->query("SELECT COUNT(*) FROM users WHERE role = 'student' AND (is_deleted IS NULL OR is_deleted = 0)")->fetchColumn();
+                $lib_item['total_parents'] = (int)$tp->query("SELECT COUNT(*) FROM users WHERE role = 'parent' AND (is_deleted IS NULL OR is_deleted = 0)")->fetchColumn();
+                $lib_item['total_seats'] = (int)$tp->query("SELECT COUNT(*) FROM seats WHERE is_active = 1")->fetchColumn();
+                $lib_item['active_allocations'] = (int)$tp->query("SELECT COUNT(*) FROM allocations WHERE status = 'active'")->fetchColumn();
+                $lib_item['db_health'] = 'OK';
+            } catch (Exception $e) {
+                $lib_item['total_students'] = null;
+                $lib_item['total_parents'] = null;
+                $lib_item['total_seats'] = null;
+                $lib_item['active_allocations'] = null;
+                $lib_item['db_health'] = 'UNAVAILABLE';
+            }
+        }
+        unset($lib_item);
+
         echo json_encode(['success' => true, 'libraries' => $libraries]);
         if (defined('IN_TEST_SUITE')) return; else exit();
 
@@ -247,18 +272,147 @@ try {
             if (defined('IN_TEST_SUITE')) return; else exit();
         }
 
+        $metrics = [
+            'available' => false,
+            'error' => null
+        ];
+
         try {
             $tenant_pdo = TenantDatabaseFactory::getTenantConnection($code);
-            $lib['metrics'] = [
-                'total_students' => (int)$tenant_pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student' AND (is_deleted IS NULL OR is_deleted = 0)")->fetchColumn(),
-                'total_parents' => (int)$tenant_pdo->query("SELECT COUNT(*) FROM users WHERE role = 'parent' AND (is_deleted IS NULL OR is_deleted = 0)")->fetchColumn(),
-                'linked_parents' => (int)$tenant_pdo->query("SELECT COUNT(DISTINCT parent_user_id) FROM parent_student_links WHERE status = 'active'")->fetchColumn(),
-                'active_allocations' => (int)$tenant_pdo->query("SELECT COUNT(*) FROM allocations WHERE status = 'active'")->fetchColumn(),
-                'total_seats' => (int)$tenant_pdo->query("SELECT COUNT(*) FROM seats WHERE is_active = 1")->fetchColumn(),
+            $today = date('Y-m-d');
+
+            // 1. Students
+            $active_students = (int)$tenant_pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student' AND (is_deleted IS NULL OR is_deleted = 0)")->fetchColumn();
+            $pending_students = (int)$tenant_pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student' AND status = 'pending' AND (is_deleted IS NULL OR is_deleted = 0)")->fetchColumn();
+            $deleted_students = (int)$tenant_pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student' AND is_deleted = 1")->fetchColumn();
+            $total_registered_students = (int)$tenant_pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student'")->fetchColumn();
+
+            // 2. Parents & Links
+            $total_parents = (int)$tenant_pdo->query("SELECT COUNT(*) FROM users WHERE role = 'parent' AND (is_deleted IS NULL OR is_deleted = 0)")->fetchColumn();
+            $linked_parents = (int)$tenant_pdo->query("SELECT COUNT(DISTINCT parent_user_id) FROM parent_student_links WHERE status = 'active'")->fetchColumn();
+            $total_parent_student_links = (int)$tenant_pdo->query("SELECT COUNT(*) FROM parent_student_links WHERE status = 'active'")->fetchColumn();
+
+            // 3. Tenant Admins
+            $total_tenant_admins = (int)$tenant_pdo->query("SELECT COUNT(*) FROM users WHERE role = 'admin' AND (is_deleted IS NULL OR is_deleted = 0)")->fetchColumn();
+
+            // 4. Seats & Allocations
+            $total_seats = (int)$tenant_pdo->query("SELECT COUNT(*) FROM seats")->fetchColumn();
+            $active_seats = (int)$tenant_pdo->query("SELECT COUNT(*) FROM seats WHERE is_active = 1")->fetchColumn();
+            $active_allocations = (int)$tenant_pdo->query("SELECT COUNT(*) FROM allocations WHERE status = 'active'")->fetchColumn();
+            $total_allocations = (int)$tenant_pdo->query("SELECT COUNT(*) FROM allocations")->fetchColumn();
+
+            // 5. Shifts
+            $total_shifts = (int)$tenant_pdo->query("SELECT COUNT(*) FROM shifts")->fetchColumn();
+            $active_shifts = (int)$tenant_pdo->query("SELECT COUNT(*) FROM shifts WHERE is_active = 1")->fetchColumn();
+
+            // 6. Attendance & Full-day events
+            $total_attendance_records = (int)$tenant_pdo->query("SELECT COUNT(*) FROM attendance")->fetchColumn();
+            $today_attendance_records = (int)$tenant_pdo->query("SELECT COUNT(*) FROM attendance WHERE date = '$today'")->fetchColumn();
+            $total_attendance_events = (int)$tenant_pdo->query("SELECT COUNT(*) FROM attendance_events")->fetchColumn();
+            $today_attendance_events = (int)$tenant_pdo->query("SELECT COUNT(*) FROM attendance_events WHERE event_date = '$today'")->fetchColumn();
+
+            // 7. Fees & Revenue
+            $total_fee_payments = (int)$tenant_pdo->query("SELECT COUNT(*) FROM fee_payments")->fetchColumn();
+            $total_collected_amount = (float)$tenant_pdo->query("SELECT COALESCE(SUM(amount), 0.00) FROM fee_payments WHERE payment_status = 'paid'")->fetchColumn();
+            $pending_dues_count = (int)$tenant_pdo->query("SELECT COUNT(*) FROM fee_payments WHERE payment_status = 'pending'")->fetchColumn();
+            $pending_dues_amount = (float)$tenant_pdo->query("SELECT COALESCE(SUM(amount), 0.00) FROM fee_payments WHERE payment_status = 'pending'")->fetchColumn();
+
+            // 8. Complaints
+            $total_complaints = (int)$tenant_pdo->query("SELECT COUNT(*) FROM complaints")->fetchColumn();
+            $open_complaints = (int)$tenant_pdo->query("SELECT COUNT(*) FROM complaints WHERE status = 'open' OR status = 'in_progress'")->fetchColumn();
+            $resolved_complaints = (int)$tenant_pdo->query("SELECT COUNT(*) FROM complaints WHERE status = 'resolved' OR status = 'closed'")->fetchColumn();
+
+            // 9. Notifications & Chat
+            $total_notifications = (int)$tenant_pdo->query("SELECT COUNT(*) FROM notifications")->fetchColumn();
+            $total_chat_messages = (int)$tenant_pdo->query("SELECT COUNT(*) FROM chat_messages")->fetchColumn();
+
+            // 10. Database Health, Path, Size, Integrity
+            $db_file_path = TenantDatabaseFactory::resolveTenantDbPath($code);
+            $db_size_bytes = file_exists($db_file_path) ? filesize($db_file_path) : 0;
+            $db_size_formatted = ($db_size_bytes > 1048576) ? round($db_size_bytes / 1048576, 2) . ' MB' : round($db_size_bytes / 1024, 2) . ' KB';
+            $integrity = $tenant_pdo->query("PRAGMA integrity_check")->fetchColumn();
+            $schema_ver = (int)$tenant_pdo->query("SELECT MAX(version) FROM schema_migrations")->fetchColumn();
+
+            // 11. Latest Backup
+            $bk_stmt = $master_pdo->prepare("SELECT * FROM backup_metadata WHERE library_code = ? ORDER BY id DESC LIMIT 1");
+            $bk_stmt->execute([$code]);
+            $latest_backup = $bk_stmt->fetch(PDO::FETCH_ASSOC);
+
+            $metrics = [
+                'available' => true,
+                'students' => [
+                    'active' => $active_students,
+                    'pending' => $pending_students,
+                    'deleted' => $deleted_students,
+                    'total' => $total_registered_students
+                ],
+                'parents' => [
+                    'total' => $total_parents,
+                    'linked_parents' => $linked_parents,
+                    'unlinked_parents' => max(0, $total_parents - $linked_parents),
+                    'total_links' => $total_parent_student_links
+                ],
+                'admins' => [
+                    'total' => $total_tenant_admins
+                ],
+                'seats' => [
+                    'total' => $total_seats,
+                    'active' => $active_seats,
+                    'allocated' => $active_allocations
+                ],
+                'shifts' => [
+                    'total' => $total_shifts,
+                    'active' => $active_shifts
+                ],
+                'attendance' => [
+                    'total_records' => $total_attendance_records,
+                    'today_records' => $today_attendance_records,
+                    'total_events' => $total_attendance_events,
+                    'today_events' => $today_attendance_events
+                ],
+                'fees' => [
+                    'total_payments' => $total_fee_payments,
+                    'total_collected' => $total_collected_amount,
+                    'total_collected_formatted' => '₹' . number_format($total_collected_amount, 2),
+                    'pending_dues_count' => $pending_dues_count,
+                    'pending_dues_amount' => $pending_dues_amount,
+                    'pending_dues_formatted' => '₹' . number_format($pending_dues_amount, 2)
+                ],
+                'complaints' => [
+                    'total' => $total_complaints,
+                    'open' => $open_complaints,
+                    'resolved' => $resolved_complaints
+                ],
+                'communications' => [
+                    'notifications' => $total_notifications,
+                    'chat_messages' => $total_chat_messages
+                ],
+                'database' => [
+                    'file_path' => $db_file_path,
+                    'size_bytes' => $db_size_bytes,
+                    'size_formatted' => $db_size_formatted,
+                    'integrity' => $integrity,
+                    'schema_version' => $schema_ver,
+                    'status' => ($integrity === 'ok') ? 'HEALTHY' : 'CORRUPTED'
+                ],
+                'latest_backup' => $latest_backup ? [
+                    'backup_id' => $latest_backup['backup_id'],
+                    'created_at' => $latest_backup['created_at'],
+                    'file_size' => (int)$latest_backup['file_size'],
+                    'file_size_formatted' => ($latest_backup['file_size'] > 1048576) ? round($latest_backup['file_size'] / 1048576, 2) . ' MB' : round($latest_backup['file_size'] / 1024, 2) . ' KB',
+                    'checksum' => $latest_backup['checksum'],
+                    'status' => $latest_backup['status']
+                ] : null
             ];
         } catch (Exception $e) {
-            $lib['metrics'] = null;
+            $metrics = [
+                'available' => false,
+                'error' => 'Failed to connect to tenant database: ' . $e->getMessage()
+            ];
         }
+
+        $lib['plan'] = $lib['plan_name'] ?? 'STANDARD';
+        $lib['metrics'] = $metrics;
 
         echo json_encode(['success' => true, 'library' => $lib]);
         if (defined('IN_TEST_SUITE')) return; else exit();

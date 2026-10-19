@@ -82,16 +82,33 @@ foreach ($libraries as &$l) {
         $t_admin = $t_pdo->query("SELECT name, email FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
         $l['admin_name'] = $t_admin ? $t_admin['name'] : 'N/A';
         $l['admin_email'] = $t_admin ? $t_admin['email'] : 'N/A';
+        $l['total_students'] = (int)$t_pdo->query("SELECT COUNT(*) FROM users WHERE role = 'student' AND (is_deleted IS NULL OR is_deleted = 0)")->fetchColumn();
+        $l['total_parents'] = (int)$t_pdo->query("SELECT COUNT(*) FROM users WHERE role = 'parent' AND (is_deleted IS NULL OR is_deleted = 0)")->fetchColumn();
+        $l['total_seats'] = (int)$t_pdo->query("SELECT COUNT(*) FROM seats WHERE is_active = 1")->fetchColumn();
+        $l['active_allocations'] = (int)$t_pdo->query("SELECT COUNT(*) FROM allocations WHERE status = 'active'")->fetchColumn();
+        $l['db_integrity'] = $t_pdo->query("PRAGMA integrity_check")->fetchColumn();
     } catch (Exception $e) {
         $l['admin_name'] = 'N/A';
         $l['admin_email'] = 'N/A';
+        $l['total_students'] = 0;
+        $l['total_parents'] = 0;
+        $l['total_seats'] = 0;
+        $l['active_allocations'] = 0;
+        $l['db_integrity'] = 'UNAVAILABLE';
     }
+    $bk_stmt = $master_pdo->prepare("SELECT backup_id, created_at, file_size, checksum, status FROM backup_metadata WHERE library_code = ? ORDER BY id DESC LIMIT 1");
+    $bk_stmt->execute([$l['library_code']]);
+    $l['latest_backup'] = $bk_stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 }
 unset($l);
 
 // Fetch Master Audit Logs
 $audit_stmt = $master_pdo->query("SELECT id, action, super_admin, library_code, result_status, metadata, created_at FROM super_admin_audit_logs ORDER BY id DESC LIMIT 50");
 $audit_logs = $audit_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Fetch All Backups for Backup & Restore Tab
+$backups_stmt = $master_pdo->query("SELECT * FROM backup_metadata ORDER BY id DESC LIMIT 100");
+$backups = $backups_stmt ? $backups_stmt->fetchAll(PDO::FETCH_ASSOC) : [];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -246,6 +263,15 @@ $audit_logs = $audit_stmt->fetchAll(PDO::FETCH_ASSOC);
         .btn-success { background: var(--accent-green); color: #FFF; }
         .btn-warning { background: var(--accent-yellow); color: #FFF; }
         .btn-danger { background: var(--accent-red); color: #FFF; }
+        .btn-info { background: #0284c7; color: #FFF; }
+        .btn-info:hover { background: #0369a1; }
+        .btn-outline { background: transparent; border: 1px solid var(--card-border); color: var(--text-main); }
+        .btn-outline:hover { background: rgba(255, 255, 255, 0.08); color: #FFF; }
+        .metric-grid-12 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-top: 14px; }
+        .metric-box { background: rgba(15, 23, 42, 0.6); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px; }
+        .metric-box h5 { font-size: 11px; text-transform: uppercase; color: var(--text-sub); margin-bottom: 6px; letter-spacing: 0.5px; }
+        .metric-box .metric-val { font-size: 18px; font-weight: 700; color: #FFF; }
+        .metric-box .metric-sub { font-size: 11px; color: var(--text-sub); margin-top: 4px; }
 
         .table-responsive { overflow-x: auto; }
         table { width: 100%; border-collapse: collapse; text-align: left; }
@@ -332,6 +358,9 @@ $audit_logs = $audit_stmt->fetchAll(PDO::FETCH_ASSOC);
             </div>
             <div class="nav-item" onclick="showTab('databaseTab', this)">
                 <i class="fas fa-database"></i> Tenant Databases
+            </div>
+            <div class="nav-item" onclick="showTab('backupTab', this)">
+                <i class="fas fa-hdd"></i> Backup & Restore
             </div>
             <div class="nav-item" onclick="showTab('adminsTab', this)">
                 <i class="fas fa-user-shield"></i> Tenant Admins
@@ -482,8 +511,9 @@ $audit_logs = $audit_stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <th>Code</th>
                                 <th>Library Name</th>
                                 <th>Contact Person</th>
-                                <th>Phone</th>
-                                <th>Email</th>
+                                <th>Students / Parents</th>
+                                <th>Seats / Alloc</th>
+                                <th>DB Health</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
@@ -494,11 +524,27 @@ $audit_logs = $audit_stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <td><strong><?php echo htmlspecialchars($l['library_code']); ?></strong></td>
                                 <td><?php echo htmlspecialchars($l['name']); ?></td>
                                 <td><?php echo htmlspecialchars($l['contact_person'] ?? 'N/A'); ?></td>
-                                <td><?php echo htmlspecialchars($l['phone'] ?? $l['contact_phone'] ?? 'N/A'); ?></td>
-                                <td><?php echo htmlspecialchars($l['email'] ?? 'N/A'); ?></td>
+                                <td>
+                                    <span style="font-weight:600;"><?php echo $l['total_students']; ?></span> st / 
+                                    <span style="color:var(--text-sub);"><?php echo $l['total_parents']; ?> pt</span>
+                                </td>
+                                <td>
+                                    <span style="font-weight:600;"><?php echo $l['active_allocations']; ?></span> / <?php echo $l['total_seats']; ?>
+                                </td>
+                                <td>
+                                    <?php if ($l['db_integrity'] === 'ok'): ?>
+                                        <span class="badge badge-active"><i class="fas fa-check-circle"></i> OK</span>
+                                    <?php else: ?>
+                                        <span class="badge badge-suspended"><i class="fas fa-exclamation-triangle"></i> <?php echo htmlspecialchars($l['db_integrity']); ?></span>
+                                    <?php endif; ?>
+                                </td>
                                 <td><span class="badge <?php echo $l['status'] === 'active' ? 'badge-active' : 'badge-suspended'; ?>"><?php echo ucfirst($l['status']); ?></span></td>
                                 <td>
-                                    <button class="btn btn-sm btn-primary" onclick="openEditModal('<?php echo $l['library_code']; ?>', '<?php echo htmlspecialchars($l['name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($l['contact_person'] ?? '', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($l['phone'] ?? '', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($l['email'] ?? '', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($l['status'] ?? 'active', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($l['tagline'] ?? '', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($l['primary_color'] ?? '#1D4ED8', ENT_QUOTES); ?>')"><i class="fas fa-edit"></i> Edit</button>
+                                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                                        <button class="btn btn-sm btn-info" onclick="openLibraryDataModal('<?php echo $l['library_code']; ?>')" title="Inspect Complete 12-Dimension Operational Data"><i class="fas fa-chart-pie"></i> View Data</button>
+                                        <button class="btn btn-sm btn-outline" onclick="createTenantBackup('<?php echo $l['library_code']; ?>')" title="Create SQLite Backup Snapshot"><i class="fas fa-hdd"></i> Backup</button>
+                                        <button class="btn btn-sm btn-primary" onclick="openEditModal('<?php echo $l['library_code']; ?>', '<?php echo htmlspecialchars($l['name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($l['contact_person'] ?? '', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($l['phone'] ?? '', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($l['email'] ?? '', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($l['status'] ?? 'active', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($l['tagline'] ?? '', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($l['primary_color'] ?? '#1D4ED8', ENT_QUOTES); ?>')"><i class="fas fa-edit"></i> Edit</button>
+                                    </div>
                                 </td>
                             </tr>
                             <?php endforeach; ?>
@@ -692,7 +738,8 @@ $audit_logs = $audit_stmt->fetchAll(PDO::FETCH_ASSOC);
         <div id="databaseTab" class="tab-pane">
             <div class="card">
                 <div class="card-header">
-                    <h3><i class="fas fa-database"></i> Tenant Databases & Provisioning Status</h3>
+                    <h3><i class="fas fa-database"></i> Tenant Databases & Health Status</h3>
+                    <button class="btn btn-primary" onclick="openTenantBackupModal()"><i class="fas fa-hdd"></i> Backup Tenant Database</button>
                 </div>
                 <div class="table-responsive">
                     <table>
@@ -701,8 +748,9 @@ $audit_logs = $audit_stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <th>Code</th>
                                 <th>Driver</th>
                                 <th>Database Target</th>
+                                <th>Integrity</th>
+                                <th>Last Backup</th>
                                 <th>Provision State</th>
-                                <th>Conn State</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -713,18 +761,123 @@ $audit_logs = $audit_stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <td><span class="badge badge-active"><?php echo strtoupper($l['db_driver'] ?? 'SQLITE'); ?></span></td>
                                 <td><code style="font-size:12px; color:var(--text-sub);"><?php $disp_path = !empty($l['db_file']) ? ('data/' . basename($l['db_file'])) : 'data/tenant_' . strtolower($l['library_code']) . '.sqlite'; echo htmlspecialchars($disp_path); ?></code></td>
                                 <td>
+                                    <?php if ($l['db_integrity'] === 'ok'): ?>
+                                        <span class="badge badge-active"><i class="fas fa-check-circle"></i> OK</span>
+                                    <?php else: ?>
+                                        <span class="badge badge-suspended"><i class="fas fa-exclamation-triangle"></i> <?php echo htmlspecialchars($l['db_integrity']); ?></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if (!empty($l['latest_backup'])): ?>
+                                        <code style="font-size:11px; color:#A78BFA;"><?php echo htmlspecialchars($l['latest_backup']['backup_id']); ?></code><br>
+                                        <small style="color:var(--text-sub);"><?php echo htmlspecialchars($l['latest_backup']['created_at']); ?></small>
+                                    <?php else: ?>
+                                        <span style="color:var(--text-sub); font-size:12px;">No backup</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
                                     <?php $ps = $l['provisioning_status'] ?? 'READY'; ?>
                                     <span class="badge <?php echo $ps === 'READY' ? 'badge-active' : ($ps === 'FAILED' ? 'badge-suspended' : 'badge-warning'); ?>"><?php echo $ps; ?></span>
                                 </td>
                                 <td>
-                                    <?php $cs = $l['db_connection_status'] ?? 'CONNECTED'; ?>
-                                    <span class="badge <?php echo $cs === 'CONNECTED' ? 'badge-active' : 'badge-suspended'; ?>"><?php echo $cs; ?></span>
-                                </td>
-                                <td>
-                                    <button class="btn btn-sm btn-primary" onclick="provisionDb('<?php echo $l['library_code']; ?>')"><i class="fas fa-cogs"></i> Provision / Verify</button>
+                                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                                        <button class="btn btn-sm btn-primary" onclick="provisionDb('<?php echo $l['library_code']; ?>')"><i class="fas fa-cogs"></i> Provision</button>
+                                        <button class="btn btn-sm btn-outline" onclick="createTenantBackup('<?php echo $l['library_code']; ?>')"><i class="fas fa-hdd"></i> Backup Now</button>
+                                        <button class="btn btn-sm btn-info" onclick="openLibraryDataModal('<?php echo $l['library_code']; ?>')"><i class="fas fa-chart-pie"></i> Details</button>
+                                    </div>
                                 </td>
                             </tr>
                             <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 6. BACKUP & RESTORE TAB -->
+        <div id="backupTab" class="tab-pane">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon blue"><i class="fas fa-hdd"></i></div>
+                    <div class="stat-info">
+                        <h4><?php echo count($backups); ?></h4>
+                        <p>Total Backups</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon purple"><i class="fas fa-server"></i></div>
+                    <div class="stat-info">
+                        <h4><?php echo count(array_filter($backups, fn($b) => ($b['scope'] ?? '') === 'MASTER')); ?></h4>
+                        <p>Master DB Backups</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon green"><i class="fas fa-database"></i></div>
+                    <div class="stat-info">
+                        <h4><?php echo count(array_filter($backups, fn($b) => ($b['scope'] ?? '') === 'TENANT')); ?></h4>
+                        <p>Tenant DB Backups</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon yellow"><i class="fas fa-shield-alt"></i></div>
+                    <div class="stat-info">
+                        <h4><?php echo count(array_filter($backups, fn($b) => ($b['status'] ?? '') === 'VERIFIED')); ?></h4>
+                        <p>Integrity Verified</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-hdd"></i> Master & Tenant Database Backups</h3>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button class="btn btn-primary" onclick="createMasterBackup()"><i class="fas fa-database"></i> Backup Master DB</button>
+                        <button class="btn btn-info" onclick="openTenantBackupModal()"><i class="fas fa-server"></i> Backup Tenant DB</button>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Backup ID</th>
+                                <th>Scope</th>
+                                <th>Target Library</th>
+                                <th>File Name</th>
+                                <th>Size</th>
+                                <th>SHA-256 Checksum</th>
+                                <th>Status</th>
+                                <th>Created At</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($backups)): ?>
+                            <tr>
+                                <td colspan="9" style="text-align: center; color: var(--text-sub); padding: 30px;">
+                                    <i class="fas fa-box-open" style="font-size: 32px; margin-bottom: 10px; display: block;"></i>
+                                    No database backup snapshots registered yet.
+                                </td>
+                            </tr>
+                            <?php else: ?>
+                            <?php foreach ($backups as $bk): ?>
+                            <tr>
+                                <td><strong><code style="color: #A78BFA;"><?php echo htmlspecialchars($bk['backup_id']); ?></code></strong></td>
+                                <td><span class="badge <?php echo $bk['scope'] === 'MASTER' ? 'badge-suspended' : 'badge-active'; ?>"><?php echo htmlspecialchars($bk['scope']); ?></span></td>
+                                <td><strong><?php echo htmlspecialchars($bk['library_code'] ?? 'MASTER'); ?></strong></td>
+                                <td><code style="font-size: 11px;"><?php echo htmlspecialchars($bk['file_name']); ?></code></td>
+                                <td><?php $sz = (int)$bk['file_size']; echo $sz > 1048576 ? round($sz/1048576, 2).' MB' : round($sz/1024, 2).' KB'; ?></td>
+                                <td><code style="font-size: 10px;" title="<?php echo htmlspecialchars($bk['checksum']); ?>"><?php echo substr($bk['checksum'], 0, 12) . '...'; ?></code></td>
+                                <td><span class="badge badge-active"><i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($bk['status']); ?></span></td>
+                                <td><?php echo htmlspecialchars($bk['created_at']); ?></td>
+                                <td>
+                                    <div style="display: flex; gap: 6px;">
+                                        <a href="api/json_super_admin.php?action=download_backup&backup_id=<?php echo urlencode($bk['backup_id']); ?>" class="btn btn-sm btn-outline" title="Download SQLite Snapshot"><i class="fas fa-download"></i></a>
+                                        <button class="btn btn-sm btn-danger" onclick="confirmRestoreBackup('<?php echo htmlspecialchars($bk['backup_id'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($bk['library_code'] ?? 'MASTER', ENT_QUOTES); ?>')" title="Restore Database with Pre-Restore Snapshot"><i class="fas fa-history"></i> Restore</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                            <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
@@ -1180,6 +1333,120 @@ $audit_logs = $audit_stmt->fetchAll(PDO::FETCH_ASSOC);
     </div>
 </div>
 
+<!-- Modal: Detailed Operational Data for Library -->
+<div id="libraryDataModal" class="modal-overlay">
+    <div class="modal" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+        <div class="modal-header">
+            <h3><i class="fas fa-chart-pie"></i> Library Operational Data & Health: <span id="ld_code" style="color: #60A5FA;"></span></h3>
+            <span class="close-modal" onclick="closeModal('libraryDataModal')">&times;</span>
+        </div>
+        <div id="ld_loading" style="text-align: center; padding: 40px;">
+            <i class="fas fa-spinner fa-spin" style="font-size: 32px; color: var(--primary);"></i>
+            <p style="margin-top: 10px; color: var(--text-sub);">Loading comprehensive metrics...</p>
+        </div>
+        <div id="ld_content" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.4); padding: 12px 16px; border-radius: 8px; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+                <div>
+                    <h4 id="ld_name" style="font-size: 18px; font-weight: 700; color: #FFF; margin: 0;"></h4>
+                    <p id="ld_sub_info" style="font-size: 12px; color: var(--text-sub); margin: 4px 0 0 0;"></p>
+                </div>
+                <div style="text-align: right;">
+                    <span id="ld_status_badge" class="badge"></span>
+                    <div id="ld_db_badge" style="margin-top: 4px;"></div>
+                </div>
+            </div>
+
+            <div class="metric-grid-12">
+                <div class="metric-box">
+                    <h5><i class="fas fa-user-graduate"></i> Students</h5>
+                    <div class="metric-val" id="ld_students_total">-</div>
+                    <div class="metric-sub" id="ld_students_sub">Active: - | Pending: -</div>
+                </div>
+                <div class="metric-box">
+                    <h5><i class="fas fa-user-friends"></i> Parents</h5>
+                    <div class="metric-val" id="ld_parents_total">-</div>
+                    <div class="metric-sub" id="ld_parents_sub">Linked: - | Total Links: -</div>
+                </div>
+                <div class="metric-box">
+                    <h5><i class="fas fa-user-shield"></i> Admins</h5>
+                    <div class="metric-val" id="ld_admins_total">-</div>
+                    <div class="metric-sub">Library Owners / Staff</div>
+                </div>
+                <div class="metric-box">
+                    <h5><i class="fas fa-chair"></i> Seats & Desks</h5>
+                    <div class="metric-val" id="ld_seats_total">-</div>
+                    <div class="metric-sub" id="ld_seats_sub">Active: - | Allocated: -</div>
+                </div>
+                <div class="metric-box">
+                    <h5><i class="fas fa-clock"></i> Shifts</h5>
+                    <div class="metric-val" id="ld_shifts_total">-</div>
+                    <div class="metric-sub" id="ld_shifts_sub">Active: -</div>
+                </div>
+                <div class="metric-box">
+                    <h5><i class="fas fa-calendar-check"></i> Attendance</h5>
+                    <div class="metric-val" id="ld_att_total">-</div>
+                    <div class="metric-sub" id="ld_att_sub">Today: - | Events: -</div>
+                </div>
+                <div class="metric-box">
+                    <h5><i class="fas fa-rupee-sign"></i> Fee Collections</h5>
+                    <div class="metric-val" id="ld_fees_collected">-</div>
+                    <div class="metric-sub" id="ld_fees_sub">Pending Dues: -</div>
+                </div>
+                <div class="metric-box">
+                    <h5><i class="fas fa-exclamation-triangle"></i> Complaints</h5>
+                    <div class="metric-val" id="ld_comp_total">-</div>
+                    <div class="metric-sub" id="ld_comp_sub">Open: - | Resolved: -</div>
+                </div>
+                <div class="metric-box">
+                    <h5><i class="fas fa-comments"></i> Communications</h5>
+                    <div class="metric-val" id="ld_comm_total">-</div>
+                    <div class="metric-sub" id="ld_comm_sub">Notifs: - | Chat: -</div>
+                </div>
+                <div class="metric-box" style="grid-column: span 2;">
+                    <h5><i class="fas fa-database"></i> Database Health & Storage</h5>
+                    <div class="metric-val" id="ld_db_size">-</div>
+                    <div class="metric-sub" id="ld_db_sub">Integrity: - | Schema: -</div>
+                </div>
+                <div class="metric-box" style="grid-column: span 2;">
+                    <h5><i class="fas fa-hdd"></i> Latest Backup Snapshot</h5>
+                    <div class="metric-val" id="ld_bk_id" style="font-size: 14px; color: #A78BFA;">-</div>
+                    <div class="metric-sub" id="ld_bk_sub">Time: - | Size: - | SHA-256: -</div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                <button class="btn btn-outline" onclick="closeModal('libraryDataModal')">Close</button>
+                <button class="btn btn-primary" id="ld_backup_btn" onclick=""><i class="fas fa-hdd"></i> Create Fresh Backup</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Select Tenant for Backup -->
+<div id="tenantBackupModal" class="modal-overlay">
+    <div class="modal" style="max-width: 480px;">
+        <div class="modal-header">
+            <h3><i class="fas fa-hdd"></i> Create Tenant Database Backup</h3>
+            <span class="close-modal" onclick="closeModal('tenantBackupModal')">&times;</span>
+        </div>
+        <div style="padding: 10px 0;">
+            <p style="color: var(--text-sub); font-size: 13px; margin-bottom: 14px;">Select the target library to take an immediate, verified SQLite database snapshot with SHA-256 integrity verification.</p>
+            <div class="form-group">
+                <label>Select Library Tenant</label>
+                <select id="tb_lib_select" class="form-control">
+                    <?php foreach ($libraries as $l): ?>
+                    <option value="<?php echo htmlspecialchars($l['library_code']); ?>"><?php echo htmlspecialchars($l['library_code'] . ' — ' . $l['name']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+                <button class="btn btn-outline" onclick="closeModal('tenantBackupModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="executeSelectedTenantBackup()"><i class="fas fa-hdd"></i> Start Backup</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 function showTab(tabId, el) {
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
@@ -1522,6 +1789,172 @@ async function submitResetPass(e) {
         location.reload();
     } else {
         alert('Error: ' + data.error);
+    }
+}
+
+async function openLibraryDataModal(code) {
+    document.getElementById('ld_code').innerText = code;
+    document.getElementById('ld_loading').style.display = 'block';
+    document.getElementById('ld_content').style.display = 'none';
+    document.getElementById('libraryDataModal').classList.add('active');
+
+    try {
+        const res = await fetch(`api/json_super_admin.php?action=get_library&library_code=${encodeURIComponent(code)}`);
+        const data = await res.json();
+        if (!data.success) {
+            alert('Error loading library data: ' + (data.error || 'Failed to fetch'));
+            closeModal('libraryDataModal');
+            return;
+        }
+
+        const lib = data.library;
+        const m = lib.metrics || {};
+
+        document.getElementById('ld_name').innerText = lib.name || code;
+        document.getElementById('ld_sub_info').innerText = `Plan: ${lib.plan_name || 'Standard'} | Valid Until: ${lib.valid_until || 'N/A'} | Contact: ${lib.contact_person || 'N/A'} (${lib.phone || 'N/A'})`;
+        
+        const stBadge = document.getElementById('ld_status_badge');
+        stBadge.className = 'badge ' + (lib.status === 'active' ? 'badge-active' : 'badge-suspended');
+        stBadge.innerText = (lib.status || 'active').toUpperCase();
+
+        if (m.available) {
+            document.getElementById('ld_db_badge').innerHTML = `<span class="badge ${m.database.integrity === 'ok' ? 'badge-active' : 'badge-suspended'}"><i class="fas fa-heartbeat"></i> ${m.database.status}</span>`;
+
+            // Students
+            document.getElementById('ld_students_total').innerText = m.students.total;
+            document.getElementById('ld_students_sub').innerText = `Active: ${m.students.active} | Pending: ${m.students.pending} | Deleted: ${m.students.deleted}`;
+
+            // Parents
+            document.getElementById('ld_parents_total').innerText = m.parents.total;
+            document.getElementById('ld_parents_sub').innerText = `Linked: ${m.parents.linked_parents} | Unlinked: ${m.parents.unlinked_parents} | Active Links: ${m.parents.total_links}`;
+
+            // Admins
+            document.getElementById('ld_admins_total').innerText = m.admins.total;
+
+            // Seats
+            document.getElementById('ld_seats_total').innerText = m.seats.total;
+            document.getElementById('ld_seats_sub').innerText = `Active: ${m.seats.active} | Allocated: ${m.seats.allocated}`;
+
+            // Shifts
+            document.getElementById('ld_shifts_total').innerText = m.shifts.total;
+            document.getElementById('ld_shifts_sub').innerText = `Active Shifts: ${m.shifts.active}`;
+
+            // Attendance
+            document.getElementById('ld_att_total').innerText = m.attendance.total_records;
+            document.getElementById('ld_att_sub').innerText = `Today Records: ${m.attendance.today_records} | Total Events: ${m.attendance.total_events} | Today Events: ${m.attendance.today_events}`;
+
+            // Fees
+            document.getElementById('ld_fees_collected').innerText = m.fees.total_collected_formatted;
+            document.getElementById('ld_fees_sub').innerText = `Paid Records: ${m.fees.total_payments} | Pending Dues: ${m.fees.pending_dues_count} (${m.fees.pending_dues_formatted})`;
+
+            // Complaints
+            document.getElementById('ld_comp_total').innerText = m.complaints.total;
+            document.getElementById('ld_comp_sub').innerText = `Open: ${m.complaints.open} | Resolved: ${m.complaints.resolved}`;
+
+            // Communications
+            document.getElementById('ld_comm_total').innerText = m.communications.notifications + m.communications.chat_messages;
+            document.getElementById('ld_comm_sub').innerText = `Notices: ${m.communications.notifications} | Chat Msgs: ${m.communications.chat_messages}`;
+
+            // DB
+            document.getElementById('ld_db_size').innerText = m.database.size_formatted;
+            document.getElementById('ld_db_sub').innerText = `PRAGMA: ${m.database.integrity} | Schema Ver: ${m.database.schema_version} | Path: ${m.database.file_path}`;
+
+            // Latest Backup
+            if (m.latest_backup) {
+                document.getElementById('ld_bk_id').innerText = m.latest_backup.backup_id;
+                document.getElementById('ld_bk_sub').innerText = `${m.latest_backup.created_at} | Size: ${m.latest_backup.file_size_formatted} | SHA-256: ${m.latest_backup.checksum.substring(0, 16)}... [${m.latest_backup.status}]`;
+            } else {
+                document.getElementById('ld_bk_id').innerText = 'No backup snapshots found';
+                document.getElementById('ld_bk_sub').innerText = 'Take a verified backup now';
+            }
+        } else {
+            document.getElementById('ld_db_badge').innerHTML = `<span class="badge badge-suspended">DB UNAVAILABLE</span>`;
+            document.getElementById('ld_students_total').innerText = 'N/A';
+            document.getElementById('ld_students_sub').innerText = m.error || 'Database connection error';
+        }
+
+        document.getElementById('ld_backup_btn').onclick = () => createTenantBackup(code);
+        document.getElementById('ld_loading').style.display = 'none';
+        document.getElementById('ld_content').style.display = 'block';
+    } catch (err) {
+        alert('Failed to load library data: ' + err.message);
+        closeModal('libraryDataModal');
+    }
+}
+
+function openTenantBackupModal() {
+    document.getElementById('tenantBackupModal').classList.add('active');
+}
+
+async function executeSelectedTenantBackup() {
+    const code = document.getElementById('tb_lib_select').value;
+    closeModal('tenantBackupModal');
+    await createTenantBackup(code);
+}
+
+async function createMasterBackup() {
+    if (!confirm('Create a fresh, verified SQLite backup snapshot of the Master SaaS Database?')) return;
+    try {
+        const res = await fetch('api/json_super_admin.php?action=create_backup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'library_code=MASTER'
+        });
+        const data = await res.json();
+        if (data.success) {
+            alert(`Master Database Backup Created Successfully!\n- Backup ID: ${data.backup.backup_id}\n- File: ${data.backup.file_name}\n- Size: ${Math.round(data.backup.file_size / 1024)} KB\n- SHA-256: ${data.backup.sha256}\n- Integrity: VERIFIED OK`);
+            location.reload();
+        } else {
+            alert('Master Backup Failed: ' + data.error);
+        }
+    } catch (err) {
+        alert('Backup request failed: ' + err.message);
+    }
+}
+
+async function createTenantBackup(code) {
+    if (!confirm(`Create a fresh, verified SQLite backup snapshot for library ${code}?`)) return;
+    try {
+        const res = await fetch('api/json_super_admin.php?action=create_backup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `library_code=${encodeURIComponent(code)}`
+        });
+        const data = await res.json();
+        if (data.success) {
+            alert(`Tenant Backup Created Successfully for ${code}!\n- Backup ID: ${data.backup.backup_id}\n- File: ${data.backup.file_name}\n- Size: ${Math.round(data.backup.file_size / 1024)} KB\n- SHA-256: ${data.backup.sha256}\n- Integrity: VERIFIED OK`);
+            location.reload();
+        } else {
+            alert('Tenant Backup Failed: ' + data.error);
+        }
+    } catch (err) {
+        alert('Backup request failed: ' + err.message);
+    }
+}
+
+async function confirmRestoreBackup(backupId, targetLibraryCode) {
+    const promptMsg = `⚠️ RESTORE CONFIRMATION\n\nTarget Library: ${targetLibraryCode}\nBackup ID: ${backupId}\n\nA mandatory pre-restore safety snapshot will automatically be captured before replacing the live database.\n\nType 'RESTORE' to confirm:`;
+    const input = prompt(promptMsg);
+    if (input !== 'RESTORE') {
+        alert('Restore cancelled.');
+        return;
+    }
+
+    try {
+        const res = await fetch('api/json_super_admin.php?action=restore_backup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `library_code=${encodeURIComponent(targetLibraryCode)}&backup_id=${encodeURIComponent(backupId)}`
+        });
+        const data = await res.json();
+        if (data.success) {
+            alert(`Restore Successful!\n${data.message}\nPre-restore safety snapshot captured: ${data.safety_snapshot}`);
+            location.reload();
+        } else {
+            alert('Restore Failed: ' + data.error);
+        }
+    } catch (err) {
+        alert('Restore request failed: ' + err.message);
     }
 }
 </script>

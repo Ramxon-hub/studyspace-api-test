@@ -14,14 +14,21 @@ import 'package:flutter_app/providers/theme_provider.dart';
 import 'package:flutter_app/providers/auth_provider.dart';
 import 'package:flutter_app/providers/seat_provider.dart';
 import 'package:flutter_app/providers/attendance_provider.dart';
+import 'package:flutter_app/config/tenant_config.dart';
+import 'package:flutter_app/providers/branding_provider.dart';
+import 'package:flutter_app/providers/tenant_provider.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+  testWidgets('App initializes properly smoke test', (WidgetTester tester) async {
+    TenantConfig.initialize();
+
     // Build our app and trigger a frame.
     await tester.pumpWidget(
       MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => ThemeProvider()),
+          ChangeNotifierProvider(create: (_) => TenantProvider()),
+          ChangeNotifierProvider(create: (_) => BrandingProvider()),
           ChangeNotifierProvider(create: (_) => AuthProvider()),
           ChangeNotifierProvider(create: (_) => SeatProvider()),
           ChangeNotifierProvider(create: (_) => AttendanceProvider()),
@@ -30,16 +37,7 @@ void main() {
       ),
     );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Verify MaterialApp widget is found
+    expect(find.byType(MaterialApp), findsOneWidget);
   });
 }

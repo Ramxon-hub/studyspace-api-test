@@ -739,6 +739,211 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen> {
     );
   }
 
+  void _createTenantBackup(String code) async {
+    _showToast("Creating backup snapshot for $code...", isError: false);
+    final res = await ApiService.superAdminCall('create_backup', {'library_code': code});
+    if (res['success'] == true && mounted) {
+      _showToast("Backup created: ${res['backup']['file_name']}", isError: false);
+      _loadAllData();
+    } else if (mounted) {
+      _showToast(res['error'] ?? "Backup failed.", isError: true);
+    }
+  }
+
+  void _showLibraryDetailsSheet(String code) async {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0F172A),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return FutureBuilder<Map<String, dynamic>>(
+          future: ApiService.superAdminCall('get_library', {'library_code': code}),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Container(
+                height: 350,
+                alignment: Alignment.center,
+                child: const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(color: Color(0xFF8B5CF6)),
+                    SizedBox(height: 14),
+                    Text("Loading 12-dimension operational data...", style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
+                  ],
+                ),
+              );
+            }
+
+            final data = snapshot.data;
+            if (data == null || data['success'] != true) {
+              return Container(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.error_outline_rounded, color: Colors.red, size: 40),
+                    const SizedBox(height: 12),
+                    Text(data?['error'] ?? "Failed to load library details.", style: const TextStyle(color: Colors.white, fontSize: 14), textAlign: TextAlign.center),
+                    const SizedBox(height: 16),
+                    ElevatedButton(onPressed: () => Navigator.pop(ctx), child: const Text("Close")),
+                  ],
+                ),
+              );
+            }
+
+            final lib = data['library'] as Map<String, dynamic>;
+            final m = (lib['metrics'] as Map<String, dynamic>?) ?? {};
+            final isAvailable = m['available'] == true;
+
+            return DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.85,
+              minChildSize: 0.5,
+              maxChildSize: 0.95,
+              builder: (_, scrollCtrl) {
+                return ListView(
+                  controller: scrollCtrl,
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xFF334155), borderRadius: BorderRadius.circular(2)))),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(color: const Color(0xFF3B82F6).withOpacity(0.2), borderRadius: BorderRadius.circular(6)),
+                          child: Text(code, style: const TextStyle(color: Color(0xFF60A5FA), fontWeight: FontWeight.bold, fontSize: 14)),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text(lib['name']?.toString() ?? '', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold))),
+                        Chip(
+                          label: Text((lib['status']?.toString() ?? 'ACTIVE').toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                          backgroundColor: lib['status'] == 'active' ? Colors.green : Colors.red,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text("Plan: ${lib['plan_name'] ?? 'Standard'} | Valid Until: ${lib['valid_until'] ?? 'N/A'}", style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                    Text("Contact: ${lib['contact_person'] ?? 'N/A'} (${lib['phone'] ?? 'N/A'})", style: const TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                    const Divider(color: Color(0xFF334155), height: 24),
+                    if (!isAvailable) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: Colors.red.withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
+                        child: Text(m['error']?.toString() ?? "Tenant database is currently unavailable.", style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+                      ),
+                    ] else ...[
+                      // Database Health Header
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFF334155))),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.storage_rounded, color: Color(0xFFA78BFA), size: 24),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text("SQLite DB: ${m['database']?['size_formatted'] ?? 'N/A'} (Integrity: ${m['database']?['integrity'] ?? 'N/A'})", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                  Text("Path: ${m['database']?['file_path'] ?? 'N/A'}", style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(color: (m['database']?['status'] == 'HEALTHY' ? Colors.green : Colors.red).withOpacity(0.2), borderRadius: BorderRadius.circular(6)),
+                              child: Text(m['database']?['status'] ?? 'OK', style: TextStyle(color: m['database']?['status'] == 'HEALTHY' ? Colors.green : Colors.red, fontWeight: FontWeight.bold, fontSize: 10)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      // 12-Dimension Grid
+                      GridView.count(
+                        crossAxisCount: 2,
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        crossAxisSpacing: 10,
+                        mainAxisSpacing: 10,
+                        childAspectRatio: 1.6,
+                        children: [
+                          _detailMetricCard("Students", "${m['students']?['active'] ?? 0} Active", "Total: ${m['students']?['total'] ?? 0} | Pending: ${m['students']?['pending'] ?? 0}", Icons.school_rounded, const Color(0xFF3B82F6)),
+                          _detailMetricCard("Parents", "${m['parents']?['linked_parents'] ?? 0} Linked", "Total: ${m['parents']?['total'] ?? 0} | Links: ${m['parents']?['total_links'] ?? 0}", Icons.family_restroom_rounded, const Color(0xFF10B981)),
+                          _detailMetricCard("Admins", "${m['admins']?['total'] ?? 0} Active", "Library Owners & Staff", Icons.admin_panel_settings_rounded, const Color(0xFFF59E0B)),
+                          _detailMetricCard("Seats & Desks", "${m['seats']?['allocated'] ?? 0} Allocated", "Total: ${m['seats']?['total'] ?? 0} | Free: ${(m['seats']?['total'] ?? 0) - (m['seats']?['allocated'] ?? 0)}", Icons.event_seat_rounded, const Color(0xFF8B5CF6)),
+                          _detailMetricCard("Shifts", "${m['shifts']?['active'] ?? 0} Active", "Configured Shifts: ${m['shifts']?['total'] ?? 0}", Icons.schedule_rounded, const Color(0xFF06B6D4)),
+                          _detailMetricCard("Attendance", "${m['attendance']?['today_records'] ?? 0} Today", "Total records: ${m['attendance']?['total_records'] ?? 0}", Icons.fact_check_rounded, const Color(0xFFEC4899)),
+                          _detailMetricCard("Fee Collections", "${m['fees']?['total_collected_formatted'] ?? '₹0'}", "Pending Dues: ${m['fees']?['pending_dues_formatted'] ?? '₹0'}", Icons.account_balance_wallet_rounded, const Color(0xFF10B981)),
+                          _detailMetricCard("Complaints", "${m['complaints']?['open'] ?? 0} Open", "Total tickets: ${m['complaints']?['total'] ?? 0}", Icons.support_agent_rounded, const Color(0xFFEF4444)),
+                          _detailMetricCard("Communications", "${(m['communications']?['notifications'] ?? 0) + (m['communications']?['chat_messages'] ?? 0)} Msgs", "Notices: ${m['communications']?['notifications']} | Chat: ${m['communications']?['chat_messages']}", Icons.chat_bubble_rounded, const Color(0xFF6366F1)),
+                          _detailMetricCard("Latest Backup", m['latest_backup'] != null ? "${m['latest_backup']['file_size_formatted']}" : "No Backup", m['latest_backup'] != null ? "${m['latest_backup']['created_at']}" : "Create one now", Icons.backup_rounded, const Color(0xFFA78BFA)),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Color(0xFF334155)), padding: const EdgeInsets.symmetric(vertical: 12)),
+                              onPressed: () => Navigator.pop(ctx),
+                              icon: const Icon(Icons.close_rounded, size: 16),
+                              label: const Text("Close"),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B5CF6), padding: const EdgeInsets.symmetric(vertical: 12)),
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                _createTenantBackup(code);
+                              },
+                              icon: const Icon(Icons.backup_rounded, size: 16),
+                              label: const Text("Create Backup"),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _detailMetricCard(String title, String val, String sub, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF334155)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 6),
+              Expanded(child: Text(title, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(val, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+          Text(sub, style: const TextStyle(color: Color(0xFF64748B), fontSize: 9), maxLines: 1, overflow: TextOverflow.ellipsis),
+        ],
+      ),
+    );
+  }
+
   void _showRejectPaymentDialog(String paymentId) {
     final reasonCtrl = TextEditingController();
 
@@ -1108,6 +1313,18 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen> {
                                   onPressed: () => _toggleLibraryStatus(code, status),
                                   icon: Icon(isSuspended ? Icons.play_arrow_rounded : Icons.block_rounded, size: 14),
                                   label: Text(isSuspended ? "Activate" : "Suspend", style: const TextStyle(fontSize: 11)),
+                                ),
+                                OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Color(0xFF3B82F6))),
+                                  onPressed: () => _showLibraryDetailsSheet(code),
+                                  icon: const Icon(Icons.analytics_rounded, size: 14, color: Color(0xFF60A5FA)),
+                                  label: const Text("View Data", style: TextStyle(fontSize: 11)),
+                                ),
+                                OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Color(0xFF10B981))),
+                                  onPressed: () => _createTenantBackup(code),
+                                  icon: const Icon(Icons.backup_rounded, size: 14, color: Color(0xFF34D399)),
+                                  label: const Text("Backup", style: TextStyle(fontSize: 11)),
                                 ),
                                 OutlinedButton.icon(
                                   style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Color(0xFF334155))),

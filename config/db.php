@@ -509,6 +509,19 @@ function init_database($pdo) {
         FOREIGN KEY (student_user_id) REFERENCES users(id) ON DELETE CASCADE
     )");
 
+    // 12. Full-Day Attendance Events Table (Multiple In/Out Events per Day)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS attendance_events (
+        id $pk_type,
+        user_id INTEGER NOT NULL,
+        event_date DATE NOT NULL,
+        event_time TEXT NOT NULL,
+        event_type VARCHAR(20) NOT NULL,
+        source VARCHAR(30) DEFAULT 'SELF',
+        notes TEXT,
+        created_at $dt_type DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )");
+
     // HIGH PERFORMANCE INDEXES FOR 100+ CONCURRENT USERS
     try {
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)");
@@ -519,6 +532,8 @@ function init_database($pdo) {
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_allocations_user_status ON allocations(user_id, status)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_allocations_seat_shift ON allocations(seat_id, shift_id, status)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_attendance_user_date ON attendance(user_id, date)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_attendance_events_user_date ON attendance_events(user_id, event_date)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_attendance_events_date ON attendance_events(event_date)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_fee_payments_alloc_month ON fee_payments(allocation_id, month_year)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_fee_payments_user_month ON fee_payments(user_id, month_year)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_chat_messages_participants ON chat_messages(sender_id, receiver_id)");
@@ -734,6 +749,28 @@ function run_migrations($pdo) {
                         } else {
                             $pdo->exec("ALTER TABLE parent_student_links ADD COLUMN relationship VARCHAR(50) DEFAULT 'Father'");
                         }
+                    } catch (Exception $e) {}
+                }
+            ],
+            10 => [
+                'name' => 'add_attendance_events_table',
+                'sql' => function($pdo) {
+                    try {
+                        $pk_type = db_is_postgres() ? "SERIAL PRIMARY KEY" : (db_is_mysql() ? "INTEGER AUTO_INCREMENT PRIMARY KEY" : "INTEGER PRIMARY KEY AUTOINCREMENT");
+                        $dt_type = db_is_postgres() ? "TIMESTAMP" : "DATETIME";
+                        $pdo->exec("CREATE TABLE IF NOT EXISTS attendance_events (
+                            id $pk_type,
+                            user_id INTEGER NOT NULL,
+                            event_date DATE NOT NULL,
+                            event_time TEXT NOT NULL,
+                            event_type VARCHAR(20) NOT NULL,
+                            source VARCHAR(30) DEFAULT 'SELF',
+                            notes TEXT,
+                            created_at $dt_type DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                        )");
+                        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_attendance_events_user_date ON attendance_events(user_id, event_date)");
+                        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_attendance_events_date ON attendance_events(event_date)");
                     } catch (Exception $e) {}
                 }
             ]

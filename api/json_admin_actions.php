@@ -435,17 +435,31 @@ try {
         $att = $stmt_att->fetch();
 
         if ($toggle_type === 'checkin') {
+            // Log in attendance_events table
+            try {
+                $stmt_ev = $pdo->prepare("INSERT INTO attendance_events (user_id, event_date, event_time, event_type, source, notes) VALUES (?, ?, ?, 'CHECK_IN', 'ADMIN', 'Admin manual check-in')");
+                $stmt_ev->execute([$student_id, $today, $current_time]);
+            } catch (Exception $e) {}
+
             if (!$att) {
                 $pdo->prepare("INSERT INTO attendance (user_id, date, check_in_time, status) VALUES (?, ?, ?, 'present')")->execute([$student_id, $today, $current_time]);
             } else {
-                $pdo->prepare("UPDATE attendance SET check_in_time = ?, check_out_time = NULL WHERE id = ?")->execute([$current_time, $att['id']]);
+                $pdo->prepare("UPDATE attendance SET check_out_time = NULL WHERE id = ?")->execute([$att['id']]);
             }
-            echo json_encode(['success' => true, 'message' => 'Admin checked in student at ' . $current_time]);
+            echo json_encode(['success' => true, 'message' => 'Admin checked in student at ' . $current_time, 'time' => $current_time]);
         } else { // checkout
-            if ($att && empty($att['check_out_time'])) {
+            // Log in attendance_events table
+            try {
+                $stmt_ev = $pdo->prepare("INSERT INTO attendance_events (user_id, event_date, event_time, event_type, source, notes) VALUES (?, ?, ?, 'CHECK_OUT', 'ADMIN', 'Admin manual check-out')");
+                $stmt_ev->execute([$student_id, $today, $current_time]);
+            } catch (Exception $e) {}
+
+            if ($att) {
                 $pdo->prepare("UPDATE attendance SET check_out_time = ? WHERE id = ?")->execute([$current_time, $att['id']]);
+            } else {
+                $pdo->prepare("INSERT INTO attendance (user_id, date, check_in_time, check_out_time, status) VALUES (?, ?, ?, ?, 'present')")->execute([$student_id, $today, $current_time, $current_time]);
             }
-            echo json_encode(['success' => true, 'message' => 'Admin checked out student at ' . $current_time]);
+            echo json_encode(['success' => true, 'message' => 'Admin checked out student at ' . $current_time, 'time' => $current_time]);
         }
         if (defined('IN_TEST_SUITE')) return; else exit();
 
