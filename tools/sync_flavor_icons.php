@@ -115,6 +115,45 @@ function generate_branded_png($width, $height, $primary_r, $primary_g, $primary_
            pack('N', 0) . $iend_chunk . $iend_crc;
 }
 
+function resize_image_to_icon($source_path, $target_path, $size) {
+    if (PHP_OS_FAMILY === 'Windows') {
+        $src_escaped = str_replace("'", "''", $source_path);
+        $dst_escaped = str_replace("'", "''", $target_path);
+        $ps_cmd = 'powershell -NoProfile -Command "' .
+            'Add-Type -AssemblyName System.Drawing; ' .
+            '$src = [System.Drawing.Bitmap]::FromFile(\'' . $src_escaped . '\'); ' .
+            '$dest = [System.Drawing.Bitmap]::new(' . $size . ', ' . $size . ', [System.Drawing.Imaging.PixelFormat]::Format32bppArgb); ' .
+            '$g = [System.Drawing.Graphics]::FromImage($dest); ' .
+            '$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality; ' .
+            '$g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic; ' .
+            '$g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality; ' .
+            '$g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality; ' .
+            '$g.Clear([System.Drawing.Color]::Transparent); ' .
+            '$r = ' . $size . ' * 0.16; ' .
+            '$path = [System.Drawing.Drawing2D.GraphicsPath]::new(); ' .
+            '$path.AddArc(0, 0, $r * 2, $r * 2, 180, 90); ' .
+            '$path.AddArc(' . $size . ' - $r * 2, 0, $r * 2, $r * 2, 270, 90); ' .
+            '$path.AddArc(' . $size . ' - $r * 2, ' . $size . ' - $r * 2, $r * 2, $r * 2, 0, 90); ' .
+            '$path.AddArc(0, ' . $size . ' - $r * 2, $r * 2, $r * 2, 90, 90); ' .
+            '$path.CloseFigure(); ' .
+            '$g.SetClip($path); ' .
+            '$whiteBrush = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::White); ' .
+            '$g.FillPath($whiteBrush, $path); ' .
+            '$pad = ' . $size . ' * 0.02; ' .
+            '$drawW = ' . $size . ' - ($pad * 2); ' .
+            '$drawH = ' . $size . ' - ($pad * 2); ' .
+            '$g.DrawImage($src, [System.Drawing.RectangleF]::new($pad, $pad, $drawW, $drawH)); ' .
+            '$g.ResetClip(); ' .
+            '$pen = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(35, 10, 40, 80), [Math]::Max(1.0, ' . $size . ' * 0.01)); ' .
+            '$g.DrawPath($pen, $path); ' .
+            '$dest.Save(\'' . $dst_escaped . '\', [System.Drawing.Imaging.ImageFormat]::Png); ' .
+            '$pen.Dispose(); $whiteBrush.Dispose(); $path.Dispose(); $g.Dispose(); $dest.Dispose(); $src.Dispose();"';
+        exec($ps_cmd);
+        return file_exists($target_path) && filesize($target_path) > 0;
+    }
+    return false;
+}
+
 function sync_all_flavor_launcher_icons($master_pdo = null) {
     if (!$master_pdo) {
         $master_pdo = get_master_pdo();
@@ -156,6 +195,7 @@ function sync_all_flavor_launcher_icons($master_pdo = null) {
         
         // Check if there is an uploaded app icon in DB
         $custom_icon_data = null;
+        $local_path = null;
         if ($code !== 'SUPERADMIN') {
             $stmt = $master_pdo->prepare("SELECT app_icon_url, primary_color FROM library_branding WHERE library_code = ?");
             $stmt->execute([$code]);
@@ -164,9 +204,10 @@ function sync_all_flavor_launcher_icons($master_pdo = null) {
                 $icon_url = $b['app_icon_url'];
                 // Check local uploads path
                 $filename = basename(parse_url($icon_url, PHP_URL_PATH));
-                $local_path = realpath(__DIR__ . '/../uploads/icons/' . $filename);
-                if ($local_path && file_exists($local_path)) {
-                    $custom_icon_data = @file_get_contents($local_path);
+                $candidate = realpath(__DIR__ . '/../uploads/icons/' . $filename);
+                if ($candidate && file_exists($candidate)) {
+                    $local_path = $candidate;
+                    $custom_icon_data = @file_get_contents($candidate);
                 }
             }
             if ($b && !empty($b['primary_color'])) {
@@ -193,17 +234,18 @@ function sync_all_flavor_launcher_icons($master_pdo = null) {
             
             $target_file = $target_dir . '/ic_launcher.png';
             
-            // If custom uploaded icon is available and matches this exact density
+            // If custom uploaded icon is available
             $use_custom = false;
             if ($custom_icon_data !== null && strlen($custom_icon_data) > 0) {
                 $c_info = @getimagesizefromstring($custom_icon_data);
                 if ($c_info && $c_info[0] === $size && $c_info[1] === $size) {
+                    file_put_contents($target_file, $custom_icon_data);
                     $use_custom = true;
+                } elseif ($local_path && file_exists($local_path)) {
+                    $use_custom = resize_image_to_icon($local_path, $target_file, $size);
                 }
             }
-            if ($use_custom) {
-                file_put_contents($target_file, $custom_icon_data);
-            } else {
+            if (!$use_custom) {
                 // Generate branded density-accurate icon for this flavor
                 $png_data = generate_branded_png($size, $size, $rgb[0], $rgb[1], $rgb[2], $flavor_name);
                 file_put_contents($target_file, $png_data);

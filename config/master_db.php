@@ -403,7 +403,8 @@ function seed_test_tenants_in_master($master_pdo) {
             'plan' => 'Gold SaaS Plan',
             'max_students' => 200,
             'valid_until' => '2030-12-31',
-            'logo_url' => '',
+            'logo_url' => 'https://studyspace-api-test.de.deplexo.com/uploads/icons/icon_lib001_keshav.png',
+            'app_icon_url' => 'https://studyspace-api-test.de.deplexo.com/uploads/icons/icon_lib001_keshav.png',
             'primary_color' => '#1D4ED8',
             'phone' => '+91 98765 00001',
             'address' => '123 Education Hub, Sector 1, City',
@@ -419,6 +420,7 @@ function seed_test_tenants_in_master($master_pdo) {
             'max_students' => 500,
             'valid_until' => '2030-12-31',
             'logo_url' => '',
+            'app_icon_url' => '',
             'primary_color' => '#10B981',
             'phone' => '+91 98765 00002',
             'address' => '456 Knowledge Park, Block B, City',
@@ -439,8 +441,8 @@ function seed_test_tenants_in_master($master_pdo) {
             $master_pdo->prepare("INSERT INTO subscriptions (library_code, plan_name, max_students, valid_until, status) VALUES (?, ?, ?, ?, 'active')")
                        ->execute([$t['code'], $t['plan'], $t['max_students'], $t['valid_until']]);
 
-            $master_pdo->prepare("INSERT INTO library_branding (library_code, logo_url, primary_color, contact_phone, address, tagline) VALUES (?, ?, ?, ?, ?, ?)")
-                       ->execute([$t['code'], $t['logo_url'], $t['primary_color'], $t['phone'], $t['address'], $t['tagline']]);
+            $master_pdo->prepare("INSERT INTO library_branding (library_code, logo_url, app_icon_url, primary_color, contact_phone, address, tagline) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                       ->execute([$t['code'], $t['logo_url'], $t['app_icon_url'] ?? '', $t['primary_color'], $t['phone'], $t['address'], $t['tagline']]);
         }
     }
 }

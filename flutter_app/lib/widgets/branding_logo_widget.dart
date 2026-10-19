@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/branding_provider.dart';
 import '../config/api_config.dart';
+import '../config/tenant_config.dart';
 
 class BrandingLogoWidget extends StatelessWidget {
   final double size;
@@ -56,6 +57,24 @@ class BrandingLogoWidget extends StatelessWidget {
   Widget _buildFallback(BuildContext context) {
     final bg = fallbackColor ?? AppColors.primaryIndigo;
     final iconColor = fallbackIconColor ?? Colors.white;
+
+    if (TenantConfig.current.flavor == LibraryFlavor.lib001) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(size * 0.22),
+        child: Image.asset(
+          'assets/branding/studyspace/logo.png',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _buildIconBadge(bg, iconColor),
+        ),
+      );
+    }
+
+    return _buildIconBadge(bg, iconColor);
+  }
+
+  Widget _buildIconBadge(Color bg, Color iconColor) {
 
     return Container(
       width: size,
