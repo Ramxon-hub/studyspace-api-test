@@ -7,6 +7,8 @@ import '../services/api_service.dart';
 import '../services/native_notification_service.dart';
 import '../services/notification_service.dart';
 
+import '../config/tenant_config.dart';
+
 class AuthProvider extends ChangeNotifier {
   UserModel? _currentUser;
   bool _isLoading = false;
@@ -23,7 +25,8 @@ class AuthProvider extends ChangeNotifier {
 
   File _getSessionFile() {
     final sysTemp = Directory.systemTemp;
-    return File('${sysTemp.path}/library_app_user_session.json');
+    final code = TenantConfig.current.tenantCode.toLowerCase();
+    return File('${sysTemp.path}/library_app_user_session_$code.json');
   }
 
   Future<bool> tryAutoLogin() async {
@@ -33,6 +36,12 @@ class AuthProvider extends ChangeNotifier {
         final saved = await file.readAsString();
         if (saved.isNotEmpty) {
           final Map<String, dynamic> userJson = jsonDecode(saved);
+          final savedLib = userJson['library_code']?.toString().toUpperCase();
+          if (savedLib != null && savedLib != TenantConfig.current.tenantCode.toUpperCase()) {
+            // Belongs to another library, remove file to avoid cross-tenant session bleed
+            try { await file.delete(); } catch (_) {}
+            return false;
+          }
           _currentUser = UserModel.fromJson(userJson);
           if (_currentUser != null) {
             NativeNotificationService.startNativeService(_currentUser!.id);
@@ -250,7 +259,9 @@ class AuthProvider extends ChangeNotifier {
   void _saveUserSession(Map<String, dynamic> userJson) async {
     try {
       final file = _getSessionFile();
-      await file.writeAsString(jsonEncode(userJson));
+      final map = Map<String, dynamic>.from(userJson);
+      map['library_code'] = TenantConfig.current.tenantCode;
+      await file.writeAsString(jsonEncode(map));
     } catch (e) {
       print("Save session error: $e");
     }

@@ -42,8 +42,10 @@ import 'services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Ensure tenant config is initialized
-  TenantConfig.initialize();
+  // Ensure tenant config is initialized only if not already explicitly set by a flavor entrypoint
+  if (!TenantConfig.isExplicitlySet) {
+    TenantConfig.initialize();
+  }
   await NotificationService().init();
 
   try {

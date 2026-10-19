@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../services/api_service.dart';
 
 enum LibraryFlavor {
   studyspace,
@@ -50,12 +51,23 @@ class TenantConfig {
   });
 
   static TenantConfig _current = studyspaceConfig;
+  static bool _isExplicitlySet = false;
 
   static TenantConfig get current => _current;
+  static bool get isExplicitlySet => _isExplicitlySet;
 
   static void initialize([LibraryFlavor? flavor]) {
-    final String? buildFlavor = appFlavor;
-    if (flavor == null && buildFlavor != null) {
+    if (_isExplicitlySet && flavor == null) {
+      // Retain flavor explicitly configured by entry point (main_lib001, main_lib002, main_superadmin)
+      return;
+    }
+
+    String? buildFlavor;
+    try {
+      buildFlavor = appFlavor;
+    } catch (_) {}
+
+    if (flavor == null && buildFlavor != null && buildFlavor.isNotEmpty) {
       if (buildFlavor == 'lib002') {
         flavor = LibraryFlavor.lib002;
       } else if (buildFlavor == 'superadmin') {
@@ -63,6 +75,10 @@ class TenantConfig {
       } else if (buildFlavor == 'lib001' || buildFlavor == 'studyspace') {
         flavor = LibraryFlavor.lib001;
       }
+    }
+
+    if (flavor != null) {
+      _isExplicitlySet = true;
     }
     
     final targetFlavor = flavor ?? LibraryFlavor.lib001;
@@ -78,6 +94,8 @@ class TenantConfig {
         _current = superadminConfig;
         break;
     }
+
+    ApiService.activeLibraryCode = _current.tenantCode;
   }
 
   // Pre-configured Tenant Settings

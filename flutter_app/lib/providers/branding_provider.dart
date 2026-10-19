@@ -2,14 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 
+import '../config/tenant_config.dart';
+
 class BrandingProvider with ChangeNotifier {
-  String _appName = 'Self Study Library';
+  String _appName = TenantConfig.current.libraryName;
   String _appLogoUrl = '';
-  String _appTagline = 'Quiet Environment & High-Speed Wi-Fi';
+  String _appTagline = TenantConfig.current.libraryTagline;
 
   String get appName => _appName;
   String get appLogoUrl => _appLogoUrl;
   String get appTagline => _appTagline;
+
+  String get _cachePrefix => 'branding_${TenantConfig.current.tenantCode.toLowerCase()}';
 
   BrandingProvider() {
     _loadCachedSettings();
@@ -19,9 +23,9 @@ class BrandingProvider with ChangeNotifier {
   Future<void> _loadCachedSettings() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      _appName = prefs.getString('cached_app_name') ?? 'Self Study Library';
-      _appLogoUrl = prefs.getString('cached_app_logo_url') ?? '';
-      _appTagline = prefs.getString('cached_app_tagline') ?? 'Quiet Environment & High-Speed Wi-Fi';
+      _appName = prefs.getString('${_cachePrefix}_name') ?? TenantConfig.current.libraryName;
+      _appLogoUrl = prefs.getString('${_cachePrefix}_logo_url') ?? '';
+      _appTagline = prefs.getString('${_cachePrefix}_tagline') ?? TenantConfig.current.libraryTagline;
       notifyListeners();
     } catch (_) {}
   }
@@ -35,14 +39,14 @@ class BrandingProvider with ChangeNotifier {
         final newLogo = (settings['app_logo_url'] ?? '').toString().trim();
         final newTagline = (settings['app_tagline'] ?? '').toString().trim();
 
-        _appName = newName.isNotEmpty ? newName : 'Self Study Library';
+        _appName = newName.isNotEmpty ? newName : TenantConfig.current.libraryName;
         _appLogoUrl = newLogo;
-        _appTagline = newTagline.isNotEmpty ? newTagline : 'Quiet Environment & High-Speed Wi-Fi';
+        _appTagline = newTagline.isNotEmpty ? newTagline : TenantConfig.current.libraryTagline;
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('cached_app_name', _appName);
-        await prefs.setString('cached_app_logo_url', _appLogoUrl);
-        await prefs.setString('cached_app_tagline', _appTagline);
+        await prefs.setString('${_cachePrefix}_name', _appName);
+        await prefs.setString('${_cachePrefix}_logo_url', _appLogoUrl);
+        await prefs.setString('${_cachePrefix}_tagline', _appTagline);
 
         notifyListeners();
       }

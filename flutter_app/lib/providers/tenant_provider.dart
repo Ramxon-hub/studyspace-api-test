@@ -81,7 +81,7 @@ class TenantProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
-  String get activeLibraryCode => _currentTenant?.code ?? (TenantConfig.current.isSingleTenant ? TenantConfig.current.tenantCode : 'LIB001');
+  String get activeLibraryCode => _currentTenant?.code ?? TenantConfig.current.tenantCode;
   String get activeLibraryName => _currentTenant?.name ?? (TenantConfig.current.isSingleTenant ? TenantConfig.current.libraryName : 'StudySpace Library');
   String get activeTagline => _currentTenant?.tagline ?? (TenantConfig.current.isSingleTenant ? TenantConfig.current.libraryTagline : 'Self Study Hall');
   Color get activePrimaryColor => _currentTenant?.primaryColor ?? (TenantConfig.current.isSingleTenant ? TenantConfig.current.primaryColor : const Color(0xFF1D4ED8));
@@ -204,12 +204,12 @@ class TenantProvider with ChangeNotifier {
 
     _currentTenant = null;
     _errorMessage = null;
-    ApiService.activeLibraryCode = 'LIB001';
+    ApiService.activeLibraryCode = TenantConfig.current.tenantCode;
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('saved_tenant_config');
     await prefs.remove('selected_library_code');
-    await prefs.remove('library_app_user_session.json');
+    await prefs.remove('library_app_user_session_${TenantConfig.current.tenantCode.toLowerCase()}.json');
 
     notifyListeners();
   }

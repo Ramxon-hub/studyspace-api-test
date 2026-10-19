@@ -272,9 +272,20 @@ All three release APKs have been compiled successfully using Flutter release mod
 
 | Flavor | Target Entrypoint | APK Output Path | Size | SHA-256 Checksum |
 | :--- | :--- | :--- | :--- | :--- |
-| **`lib001`** | `lib/main_lib001.dart` | `flutter_app/build/app/outputs/flutter-apk/app-lib001-release.apk` | 61,679,731 bytes (58.8 MB) | `14A90A1D8BA1076B6597F588222BA1F502183D934C3648CCC8A1971BE76DA4F1` |
-| **`lib002`** | `lib/main_lib002.dart` | `flutter_app/build/app/outputs/flutter-apk/app-lib002-release.apk` | 61,680,047 bytes (58.8 MB) | `7836FB7686BE96F44E31A96E1AB63FC5E0922EF94D5CD4FE3529D3D941B6A633` |
-| **`superadmin`** | `lib/main_superadmin.dart` | `flutter_app/build/app/outputs/flutter-apk/app-superadmin-release.apk` | 61,680,359 bytes (58.8 MB) | `53E2B33CECBCFF2872F0D10700CBED72CBBF35ABDD6AA689D9EB9A76D08CDAE5` |
+| **`lib001`** | `lib/main_lib001.dart` | `flutter_app/build/app/outputs/flutter-apk/app-lib001-release.apk` | 61,679,731 bytes (58.8 MB) | `104CDA94B19A57B51F73FD469660F6F413D06F056B2F815CCCDB89150BA316F9` |
+| **`lib002`** | `lib/main_lib002.dart` | `flutter_app/build/app/outputs/flutter-apk/app-lib002-release.apk` | 61,680,047 bytes (58.8 MB) | `5F7179AB726A4D5E74D621FF86A53F4DEEEE374BF49AE207C438A7BAF30D6314` |
+| **`superadmin`** | `lib/main_superadmin.dart` | `flutter_app/build/app/outputs/flutter-apk/app-superadmin-release.apk` | 61,680,359 bytes (58.8 MB) | `1C815E9EA2E94E8DC03880CF88363065C2E0BB50B71669A7DB7114CDF91090DE` |
+
+### 6.1 Tenant Isolation Hotfix & Verification
+Following user feedback where both APKs were loading identical `LIB001` datasets when tested on the same device, an exhaustive audit confirmed:
+- **Databases Intact**: The server databases `tenant_lib001.sqlite` (9 users) and `tenant_lib002.sqlite` (7 users) remained strictly separated and pristine.
+- **Root Cause**: `flutter_app/lib/main.dart` called `TenantConfig.initialize()` with no parameters, which silently overwrote the explicitly initialized `LibraryFlavor.lib002` back to `LIB001` fallback during application launch. Additionally, `AuthProvider` session caching and `BrandingProvider` cache keys lacked tenant scoping.
+- **Permanent Fixes**:
+  1. `TenantConfig`: Added `_isExplicitlySet` guard so that unparameterized initialization never overwrites an active flavor, and synchronized `ApiService.activeLibraryCode = _current.tenantCode`.
+  2. `ApiService`: Replaced static string with dynamic getter referencing `TenantConfig.current.tenantCode`.
+  3. `AuthProvider`: Scoped user session files to `library_app_user_session_${tenantCode}.json`, preventing cross-flavor auto-login bleeds.
+  4. `BrandingProvider`: Scoped cache keys to tenant codes (`branding_${tenantCode}_name`, etc.).
+  5. `TenantIsolationTest`: Added `flutter_app/test/tenant_isolation_test.dart` verifying 100% header and flavor retention for `LIB002`.
 
 ---
 

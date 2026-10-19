@@ -1,10 +1,14 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
+import '../config/tenant_config.dart';
 
 class ApiService {
   static const Duration _timeout = Duration(seconds: 15);
-  static String activeLibraryCode = 'LIB001';
+  static String? _activeLibraryCode;
+
+  static String get activeLibraryCode => _activeLibraryCode ?? TenantConfig.current.tenantCode;
+  static set activeLibraryCode(String code) => _activeLibraryCode = code;
 
   static Map<String, String> get defaultHeaders => {
     'X-Library-Code': activeLibraryCode,
